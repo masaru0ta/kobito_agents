@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 
-set PORT=8300
+set PORT=8200
 
 netstat -ano | findstr "LISTENING" | findstr ":%PORT% " >nul 2>&1
 if not errorlevel 1 (

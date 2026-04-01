@@ -102,8 +102,8 @@ kobito_agents固有のメタデータをキャッシュする。
 
 ## サーバー
 
-- FastAPI + uvicorn、ポート8300、ホットリロード
-- `start.bat` で起動（`uvicorn server.app:app --port 8300 --reload` + ブラウザ自動起動）
+- FastAPI + uvicorn、ポート8200、ホットリロード
+- `start.bat` で起動（`uvicorn server.app:app --port 8200 --reload` + ブラウザ自動起動）
 
 ## ディレクトリ構成
 
