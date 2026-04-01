@@ -253,7 +253,7 @@ async function sendMessage() {
           try {
             const event = JSON.parse(line.slice(6));
             if (event.type === 'chunk') {
-              fullResponse += event.data;
+              fullResponse = event.data;
               bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
             } else if (event.type === 'tool_use') {
               appendToolUse(event.data);

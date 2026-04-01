@@ -87,8 +87,6 @@ async def send_chat(
                     yield f"data: {json.dumps({'type': 'tool_use', 'data': desc}, ensure_ascii=False)}\n\n"
             elif ev.event_type == "result":
                 yield f"data: {json.dumps({'type': 'session_id', 'data': ev.session_id}, ensure_ascii=False)}\n\n"
-                if ev.result_text:
-                    yield f"data: {json.dumps({'type': 'chunk', 'data': ev.result_text}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
