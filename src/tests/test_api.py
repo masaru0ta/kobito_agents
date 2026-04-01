@@ -150,6 +150,27 @@ class TestSessionsAPI:
         assert len(data) == 2
         assert data[0]["role"] == "user"
 
+    def test_チャット送信でSSEストリームが返る(self, mock_app):
+        app, mock_config, _, mock_bridge = mock_app
+        mock_config.get_agent.return_value = AgentInfo(
+            id="system", name="レプリカ", path="/tmp/project", cli="claude",
+            model_tier="deep", system_prompt="テスト",
+        )
+
+        async def fake_stream(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "応答"}]}}
+            yield {"type": "result", "session_id": "sess-new", "result": "応答"}
+
+        mock_bridge.run_stream = MagicMock(return_value=fake_stream())
+
+        with TestClient(app) as client:
+            resp = client.post("/api/agents/system/chat", json={
+                "message": "こんにちは",
+            })
+
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+
     def test_CLI起動エンドポイント(self, mock_app):
         app, mock_config, _, mock_bridge = mock_app
         mock_config.get_agent.return_value = AgentInfo(
