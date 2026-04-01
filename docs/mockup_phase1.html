@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kobito_agents - モックアップ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #1c2128;
+    --bg-hover: #21262d;
+    --bg-active: #1f6feb22;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+    --accent-bg: #1f6feb;
+    --user-bubble: #1f6feb;
+    --assistant-bg: #21262d;
+    --success: #3fb950;
+    --danger: #f85149;
+    --scrollbar-thumb: #30363d;
+    --scrollbar-track: transparent;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ============================================================
+     レイアウト: 3ペイン
+     ============================================================ */
+  .layout {
+    display: flex;
+    height: 100vh;
+  }
+
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+  }
+
+  .middle-pane {
+    width: 320px;
+    flex-shrink: 0;
+  }
+
+  .chat-pane, .settings-pane {
+    flex: 1;
+    min-width: 300px;
+  }
+
+  /* リサイズハンドル */
+  .resize-handle {
+    width: 4px;
+    cursor: col-resize;
+    background: var(--border);
+    flex-shrink: 0;
+    transition: background 0.15s;
+    position: relative;
+  }
+
+  .resize-handle:hover,
+  .resize-handle.dragging {
+    background: var(--accent);
+  }
+
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -4px;
+    right: -4px;
+    bottom: 0;
+  }
+
+  /* ============================================================
+     左ペイン: エージェント一覧
+     ============================================================ */
+  .sidebar {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+
+  .sidebar-section-label {
+    padding: 12px 16px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  .agent-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+  }
+
+  .agent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .agent-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .agent-item.active {
+    background: var(--bg-active);
+    border: 1px solid var(--accent);
+  }
+
+  .agent-item:not(.active) {
+    border: 1px solid transparent;
+  }
+
+  .agent-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .agent-avatar.system { background: #1f6feb44; color: var(--accent); }
+
+  .agent-info {
+    overflow: hidden;
+  }
+
+  .agent-name {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .agent-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ============================================================
+     中央ペイン: 会話リスト + タブ
+     ============================================================ */
+  .middle-pane {
+    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .tab {
+    flex: 1;
+    padding: 12px 0;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+
+  .tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .new-chat-btn {
+    margin: 12px;
+    padding: 10px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .new-chat-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--bg-active);
+  }
+
+  .conversation-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+  }
+
+  .conversation-item {
+    padding: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s;
+    margin-bottom: 2px;
+  }
+
+  .conversation-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .conversation-item.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+  }
+
+  .conv-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .conv-date {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .conv-count {
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+    min-width: 20px;
+    text-align: right;
+  }
+
+  .conv-preview {
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 応答待ちインジケーター */
+  .conv-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .conv-status .spinner {
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .conv-status .label {
+    font-size: 11px;
+    color: var(--accent);
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ============================================================
+     中央ペイン: 設定タブの内容
+     ============================================================ */
+  .settings-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: none;
+  }
+
+  .settings-content.visible {
+    display: block;
+  }
+
+  .settings-section {
+    margin-bottom: 24px;
+  }
+
+  .settings-section label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .settings-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .settings-input:focus {
+    border-color: var(--accent);
+  }
+
+  .settings-save-btn {
+    padding: 8px 20px;
+    background: var(--accent-bg);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .settings-save-btn:hover {
+    background: var(--accent-hover);
+  }
+
+  /* ============================================================
+     右ペイン: チャット画面
+     ============================================================ */
+  .chat-pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .chat-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .chat-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .chat-action-btn {
+    padding: 5px 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .chat-action-btn:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+  }
+
+  .chat-action-btn.cli {
+    border-color: var(--success);
+    color: var(--success);
+  }
+
+  .chat-action-btn.cli:hover {
+    background: #3fb95018;
+  }
+
+  .chat-action-btn.hide:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .message {
+    display: flex;
+    flex-direction: column;
+    max-width: 75%;
+  }
+
+  .message.user {
+    align-self: flex-end;
+    align-items: flex-end;
+  }
+
+  .message.assistant {
+    align-self: flex-start;
+    align-items: flex-start;
+  }
+
+  .message-sender {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    padding: 0 4px;
+  }
+
+  .message-bubble {
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: break-word;
+  }
+
+  .message.user .message-bubble {
+    background: var(--user-bubble);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+
+  .message.assistant .message-bubble {
+    background: var(--assistant-bg);
+    color: var(--text-primary);
+    border-bottom-left-radius: 4px;
+  }
+
+  .message-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    padding: 0 4px;
+  }
+
+  .tool-use-notice {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  .tool-use-notice .icon {
+    color: var(--accent);
+  }
+
+  /* チャット内の考え中表示 */
+  .thinking-indicator {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--assistant-bg);
+    border-radius: 12px;
+    border-bottom-left-radius: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .thinking-indicator .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  /* 入力エリア */
+  .chat-input-area {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .chat-input-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  .chat-input {
+    flex: 1;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    min-height: 42px;
+    max-height: 120px;
+    transition: border-color 0.15s;
+  }
+
+  .chat-input:focus {
+    border-color: var(--accent);
+  }
+
+  .chat-input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .send-btn {
+    padding: 10px 20px;
+    background: var(--accent-bg);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+
+  .send-btn:hover {
+    background: var(--accent-hover);
+  }
+
+  .input-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+    margin-top: 4px;
+  }
+
+  /* ============================================================
+     右ペイン: 設定画面（タブ切替時）
+     ============================================================ */
+  .settings-pane {
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .settings-pane.visible {
+    display: flex;
+  }
+
+  .chat-pane.hidden {
+    display: none;
+  }
+
+  .settings-pane-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .settings-pane-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  .settings-field {
+    margin-bottom: 20px;
+  }
+
+  .settings-field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+
+  .settings-field input,
+  .settings-field textarea {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .settings-field input:focus,
+  .settings-field textarea:focus {
+    border-color: var(--accent);
+  }
+
+  .settings-field textarea {
+    min-height: 400px;
+    resize: vertical;
+    line-height: 1.6;
+  }
+
+  .settings-actions {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* ============================================================
+     スクロールバー
+     ============================================================ */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+  }
+
+  /* ============================================================
+     空状態
+     ============================================================ */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    gap: 8px;
+  }
+
+  .empty-state .icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+  }
+
+  .empty-state .title {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .empty-state .desc {
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ============================
+       左ペイン: エージェント一覧
+       ============================ -->
+  <div class="sidebar">
+    <div class="sidebar-header">kobito_agents</div>
+    <div class="sidebar-section-label">エージェント</div>
+    <div class="agent-list">
+      <div class="agent-item active">
+        <div class="agent-avatar system">R</div>
+        <div class="agent-info">
+          <div class="agent-name">レプリカ</div>
+          <div class="agent-desc">システム管理エージェント</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================
+       中央ペイン: タブ + 会話リスト
+       ============================ -->
+  <div class="middle-pane">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('chat')">会話</div>
+      <div class="tab" onclick="switchTab('settings')">設定</div>
+    </div>
+
+    <!-- 会話タブ -->
+    <div id="chat-tab-content">
+      <div class="new-chat-btn" onclick="newChat()">+ 新規会話</div>
+      <div class="conversation-list">
+        <div class="conversation-item active">
+          <div class="conv-header">
+            <span class="conv-date">2026/04/01 15:30</span>
+            <span class="conv-count">(4)</span>
+          </div>
+          <div class="conv-preview">Phase 1の仕様書を確認してください</div>
+        </div>
+        <div class="conversation-item">
+          <div class="conv-header">
+            <span class="conv-date">2026/04/01 14:20</span>
+            <span class="conv-count">(8)</span>
+          </div>
+          <div class="conv-preview">旧プロジェクトの構成を把握して...</div>
+          <div class="conv-status">
+            <div class="spinner"></div>
+            <span class="label">応答待ち</span>
+          </div>
+        </div>
+        <div class="conversation-item">
+          <div class="conv-header">
+            <span class="conv-date">2026/04/01 13:00</span>
+            <span class="conv-count">(2)</span>
+          </div>
+          <div class="conv-preview">こんにちは</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 設定タブ（非表示） -->
+    <div id="settings-tab-content" class="settings-content">
+      <div class="settings-section">
+        <label>名前</label>
+        <input type="text" class="settings-input" value="レプリカ">
+      </div>
+      <div class="settings-section">
+        <label>説明</label>
+        <input type="text" class="settings-input" value="システム管理エージェント">
+      </div>
+      <div class="settings-section">
+        <label>モデル</label>
+        <select class="settings-input">
+          <option value="deep" selected>深い思考（opus）</option>
+          <option value="quick">軽い即答（sonnet）</option>
+        </select>
+      </div>
+      <div class="settings-section">
+        <label>プロジェクトパス</label>
+        <input type="text" class="settings-input" value="D:\AI\code\kobito_agents" disabled style="opacity: 0.6;">
+      </div>
+      <div class="settings-section">
+        <button class="settings-save-btn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- リサイズハンドル -->
+  <div class="resize-handle" id="resize-handle"></div>
+
+  <!-- ============================
+       右ペイン: チャット画面
+       ============================ -->
+  <div class="chat-pane" id="chat-pane">
+    <div class="chat-header">
+      <span class="chat-title">2026/04/01 15:30 の会話</span>
+      <div class="chat-actions">
+        <button class="chat-action-btn">要約する</button>
+        <button class="chat-action-btn cli">CLI起動</button>
+        <button class="chat-action-btn hide">非表示</button>
+      </div>
+    </div>
+
+    <div class="chat-messages">
+      <div class="message user">
+        <div class="message-sender">あなた</div>
+        <div class="message-bubble">Phase 1の仕様書を確認してください</div>
+        <div class="message-time">15:30</div>
+      </div>
+
+      <div class="tool-use-notice">
+        <span class="icon">&#9881;</span> Read: spec_phase1.md
+      </div>
+
+      <div class="message assistant">
+        <div class="message-sender">レプリカ</div>
+        <div class="message-bubble">
+          仕様書を確認した。Phase 1の構成は以下の通りだ。<br><br>
+          <strong>コンポーネント:</strong><br>
+          1. ConfigManager — エージェント登録管理<br>
+          2. Runner — Claude Code実行エンジン<br>
+          3. ChatManager — チャット処理<br>
+          4. Web API — FastAPIエンドポイント<br>
+          5. Web UI — フロントエンド<br><br>
+          データモデルとAPI設計に問題はない。実装に入れる状態だ。
+        </div>
+        <div class="message-time">15:31</div>
+      </div>
+
+      <div class="message user">
+        <div class="message-sender">あなた</div>
+        <div class="message-bubble">ではConfigManagerから実装を始めてくれ</div>
+        <div class="message-time">15:32</div>
+      </div>
+
+      <div class="tool-use-notice">
+        <span class="icon">&#9881;</span> Write: src/server/config.py
+      </div>
+      <div class="tool-use-notice">
+        <span class="icon">&#9881;</span> Write: data/agents.json
+      </div>
+
+      <div class="message assistant">
+        <div class="message-sender">レプリカ</div>
+        <div class="message-bubble">
+          ConfigManagerを実装した。<br><br>
+          - <code>data/agents.json</code> にsystemエージェントを初期登録済み<br>
+          - <code>list_agents()</code>, <code>get_agent()</code>, <code>update_agent()</code> を実装<br>
+          - CLAUDE.mdの読み書きに対応<br><br>
+          次はRunnerに進む。
+        </div>
+        <div class="message-time">15:33</div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <textarea class="chat-input" placeholder="メッセージを入力..." rows="1"></textarea>
+        <button class="send-btn">送信</button>
+      </div>
+      <div class="input-hint">Enter で送信 / Shift+Enter で改行</div>
+    </div>
+  </div>
+
+  <!-- ============================
+       右ペイン: 設定画面（タブ切替時）
+       ============================ -->
+  <div class="settings-pane" id="settings-pane">
+    <div class="settings-pane-header">レプリカ — AI設定 (CLAUDE.md)</div>
+    <div class="settings-pane-body">
+      <div class="settings-field">
+        <label>CLAUDE.md</label>
+        <textarea># kobito_agents
+
+あなたのは「レプリカ」。このシステム（kobito_agents）の設計者であり管理者である。
+
+ユーザーと高度な会話・思考の相手となり、このシステムを改善するのがあなたの仕事である。
+深く思考して、ユーザーと壁打ちしながらシステムを設計しする。
+知能の低いAIエージェントのような振る舞いはしてはいけない。
+
+# 話し方
+- 一人称: 「私（わたし）」
+- 断定的かつ論理的
+- 無駄の排除
+
+# 考え方
+- 深く考え、短く語る
+- 言葉の意図を読む
+- 自律的に判断・行動する</textarea>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <button class="chat-action-btn">リセット</button>
+      <button class="settings-save-btn">保存</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+  const chatTabContent = document.getElementById('chat-tab-content');
+  const settingsTabContent = document.getElementById('settings-tab-content');
+  const chatPane = document.getElementById('chat-pane');
+  const settingsPane = document.getElementById('settings-pane');
+
+  if (tab === 'chat') {
+    document.querySelectorAll('.tab')[0].classList.add('active');
+    chatTabContent.style.display = '';
+    settingsTabContent.classList.remove('visible');
+    chatPane.classList.remove('hidden');
+    chatPane.style.display = '';
+    settingsPane.classList.remove('visible');
+    settingsPane.style.display = '';
+  } else {
+    document.querySelectorAll('.tab')[1].classList.add('active');
+    chatTabContent.style.display = 'none';
+    settingsTabContent.classList.add('visible');
+    chatPane.classList.add('hidden');
+    chatPane.style.display = 'none';
+    settingsPane.classList.add('visible');
+    settingsPane.style.display = 'flex';
+  }
+}
+
+function newChat() {
+  // モックアップ用：新規会話ボタン
+  alert('新規会話を作成します');
+}
+
+// ============================================================
+// 中央・右ペイン間のリサイズ
+// ============================================================
+(function() {
+  const handle = document.getElementById('resize-handle');
+  const middlePane = document.querySelector('.middle-pane');
+  const STORAGE_KEY = 'kobito_agents_middle_width';
+  const MIN_WIDTH = 200;
+  const MAX_WIDTH = 600;
+
+  // localStorage から復元
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    const w = parseInt(saved, 10);
+    if (w >= MIN_WIDTH && w <= MAX_WIDTH) {
+      middlePane.style.width = w + 'px';
+    }
+  }
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  handle.addEventListener('mousedown', function(e) {
+    dragging = true;
+    startX = e.clientX;
+    startWidth = middlePane.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    const delta = e.clientX - startX;
+    let newWidth = startWidth + delta;
+    newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
+    middlePane.style.width = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // localStorage に保存
+    localStorage.setItem(STORAGE_KEY, middlePane.offsetWidth);
+  });
+})();
+</script>
+
+</body>
+</html>

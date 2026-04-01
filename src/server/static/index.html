@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kobito_agents</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- 左ペイン: エージェント一覧 -->
+  <div class="sidebar">
+    <div class="sidebar-header">kobito_agents</div>
+    <div class="sidebar-section-label">エージェント</div>
+    <div class="agent-list" id="agent-list"></div>
+  </div>
+
+  <!-- 中央ペイン: タブ + コンテンツ -->
+  <div class="middle-pane" id="middle-pane">
+    <div class="tabs">
+      <div class="tab active" data-tab="chat">会話</div>
+      <div class="tab" data-tab="settings">設定</div>
+    </div>
+
+    <!-- 会話タブ -->
+    <div id="chat-tab-content">
+      <div class="new-chat-btn" id="new-chat-btn">+ 新規会話</div>
+      <div class="conversation-list" id="conversation-list"></div>
+    </div>
+
+    <!-- 設定タブ -->
+    <div id="settings-tab-content" class="settings-content">
+      <div class="settings-section">
+        <label>名前</label>
+        <input type="text" class="settings-input" data-field="name">
+      </div>
+      <div class="settings-section">
+        <label>説明</label>
+        <input type="text" class="settings-input" data-field="description">
+      </div>
+      <div class="settings-section">
+        <label>モデル</label>
+        <select class="settings-input" data-field="model_tier">
+          <option value="deep">深い思考（opus）</option>
+          <option value="quick">軽い即答（sonnet）</option>
+        </select>
+      </div>
+      <div class="settings-section">
+        <label>プロジェクトパス</label>
+        <input type="text" class="settings-input" data-field="path" disabled style="opacity: 0.6;">
+      </div>
+      <div class="settings-section">
+        <button class="settings-save-btn" id="settings-save-btn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- リサイズハンドル -->
+  <div class="resize-handle" id="resize-handle"></div>
+
+  <!-- 右ペイン: チャット画面 -->
+  <div class="chat-pane" id="chat-pane">
+    <div class="chat-header">
+      <span class="chat-title" id="chat-title"></span>
+      <div class="chat-actions">
+        <button class="chat-action-btn" id="btn-summarize">要約する</button>
+        <button class="chat-action-btn cli" id="btn-cli">CLI起動</button>
+        <button class="chat-action-btn hide" id="btn-hide">非表示</button>
+      </div>
+    </div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <textarea class="chat-input" id="chat-input" placeholder="メッセージを入力..." rows="1"></textarea>
+        <button class="send-btn" id="send-btn">送信</button>
+      </div>
+      <div class="input-hint">Enter で送信 / Shift+Enter で改行</div>
+    </div>
+  </div>
+
+  <!-- 右ペイン: 設定画面 -->
+  <div class="settings-pane" id="settings-pane">
+    <div class="settings-pane-header" id="settings-pane-header"></div>
+    <div class="settings-pane-body">
+      <div class="settings-field">
+        <label>CLAUDE.md</label>
+        <textarea data-field="system-prompt"></textarea>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <button class="chat-action-btn" id="btn-reset-prompt">リセット</button>
+      <button class="settings-save-btn" id="btn-save-prompt">保存</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
