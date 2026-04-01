@@ -82,6 +82,16 @@ def test_env(tmp_path_factory):
         _assistant_msg("a3", "了解した。", "2026-04-01T07:00:05Z", session_id="sess-002", parent_uuid="u3"),
     ])
 
+    # sess-003: Markdown表示と空メッセージのテスト用
+    make_session_jsonl(sessions_dir, "sess-003", [
+        _user_msg("u4", "Markdownテスト", "2026-04-01T08:00:00Z", session_id="sess-003"),
+        _assistant_msg("a4", "**太字**と`コード`と\n- リスト1\n- リスト2", "2026-04-01T08:00:05Z", session_id="sess-003", parent_uuid="u4"),
+        _user_msg("u5", "", "2026-04-01T08:00:10Z", session_id="sess-003", parent_uuid="a4"),  # 空メッセージ
+        _assistant_msg("a5", "", "2026-04-01T08:00:15Z", session_id="sess-003", parent_uuid="u5"),  # 空レスポンス
+        _user_msg("u6", "次の質問", "2026-04-01T08:01:00Z", session_id="sess-003", parent_uuid="a5"),
+        _assistant_msg("a6", "回答だ。", "2026-04-01T08:01:05Z", session_id="sess-003", parent_uuid="u6"),
+    ])
+
     # サーバー起動
     config = ConfigManager(data_dir=data_dir, system_path=str(project_dir))
     reader = ClaudeSessionReader(claude_home=base / ".claude")
@@ -136,7 +146,7 @@ class TestSessionList:
         page.wait_for_selector(".conversation-item")
 
         items = page.query_selector_all(".conversation-item")
-        assert len(items) == 2
+        assert len(items) == 3
 
     def test_セッション一覧に件数が表示される(self, test_env, page):
         page.goto(test_env["url"])
@@ -245,6 +255,53 @@ class TestSettingsTab:
         page.wait_for_selector("select[data-field='model_tier']")
         select = page.query_selector("select[data-field='model_tier']")
         assert select is not None
+
+
+class TestMessageRendering:
+    """メッセージ表示の品質"""
+
+    def test_空メッセージはスキップされる(self, test_env, page):
+        page.goto(test_env["url"])
+        page.wait_for_selector(".conversation-item")
+        # sess-003を選択（空メッセージを含む）
+        items = page.query_selector_all(".conversation-item")
+        for item in items:
+            if "回答だ" in (item.text_content() or ""):
+                item.click()
+                break
+        page.wait_for_selector(".message")
+
+        # 空バブルがないことを確認（全バブルにテキストがある）
+        bubbles = page.query_selector_all(".message-bubble")
+        for bubble in bubbles:
+            text = bubble.text_content().strip()
+            assert len(text) > 0, "空のメッセージバブルが表示されている"
+
+    def test_Markdownがレンダリングされる(self, test_env, page):
+        page.goto(test_env["url"])
+        page.wait_for_selector(".conversation-item")
+        items = page.query_selector_all(".conversation-item")
+        for item in items:
+            if "回答だ" in (item.text_content() or ""):
+                item.click()
+                break
+        page.wait_for_selector(".message-bubble strong", timeout=5000)
+
+        strong = page.query_selector(".message-bubble strong")
+        assert strong is not None, "Markdownの太字がレンダリングされていない"
+
+    def test_改行が反映される(self, test_env, page):
+        page.goto(test_env["url"])
+        page.wait_for_selector(".conversation-item")
+        items = page.query_selector_all(".conversation-item")
+        for item in items:
+            if "回答だ" in (item.text_content() or ""):
+                item.click()
+                break
+        page.wait_for_selector(".message-bubble li", timeout=5000)
+
+        li = page.query_selector(".message-bubble li")
+        assert li is not None, "Markdownのリストがレンダリングされていない"
 
 
 class TestResize:

@@ -133,6 +133,10 @@ function renderMessages(messages) {
   const agentName = agent ? agent.name : '';
 
   messages.forEach(m => {
+    // 空メッセージはスキップ
+    const content = (m.content || '').trim();
+    if (!content && (!m.tool_uses || m.tool_uses.length === 0)) return;
+
     // ツール使用通知
     if (m.tool_uses && m.tool_uses.length > 0) {
       m.tool_uses.forEach(tu => {
@@ -144,15 +148,23 @@ function renderMessages(messages) {
       });
     }
 
+    // 空contentのtool_useのみメッセージはバブルをスキップ
+    if (!content) return;
+
     const div = document.createElement('div');
     div.className = `message ${m.role}`;
 
     const sender = m.role === 'user' ? 'あなた' : agentName;
     const time = new Date(m.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
+    // Markdownレンダリング（assistantのみ）
+    const bubbleContent = m.role === 'assistant' && typeof marked !== 'undefined'
+      ? marked.parse(content)
+      : escapeHtml(content);
+
     div.innerHTML = `
       <div class="message-sender">${escapeHtml(sender)}</div>
-      <div class="message-bubble">${escapeHtml(m.content)}</div>
+      <div class="message-bubble">${bubbleContent}</div>
       <div class="message-time">${time}</div>
     `;
     container.appendChild(div);
