@@ -269,6 +269,8 @@
     color: var(--text-muted);
   }
 
+  .conv-header-right { display: flex; align-items: center; gap: 5px; }
+
   .conv-count {
     font-size: 12px;
     color: var(--accent);
@@ -276,6 +278,9 @@
     min-width: 20px;
     text-align: right;
   }
+
+  .process-dot { width: 7px; height: 7px; border-radius: 50%; background: transparent; display: inline-block; flex-shrink: 0; }
+  .process-active .process-dot { background: #3fb950; box-shadow: 0 0 4px #3fb950; }
 
   .conv-title {
     font-size: 13px;
@@ -700,6 +705,43 @@
     background: var(--text-muted);
   }
 
+  /* サイドバートグル */
+  .sidebar-toggle { display: none; padding: 6px 10px; background: transparent; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; flex-shrink: 0; line-height: 1; }
+
+  /* モバイル戻るボタン */
+  .mobile-back-btn { display: none; padding: 5px 10px; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 12px; cursor: pointer; flex-shrink: 0; }
+
+  /* ヘッダーモデルセレクト */
+  .chat-title-group { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .header-model-select { background: var(--bg-tertiary); border: 1px solid #e3b341; border-radius: 4px; color: #e3b341; font-size: 12px; padding: 4px 10px; font-weight: 600; outline: none; cursor: pointer; }
+
+  /* トースト */
+  .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: #b45309; color: #fff; border: 1px solid #d97706; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+
+  /* レスポンシブ: 900px以下 */
+  @media (max-width: 900px) {
+    .sidebar-toggle { display: block; }
+    .resize-handle { display: none; }
+    .middle-pane { width: 260px !important; }
+    .sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 20; transform: translateX(-220px); transition: transform 0.25s ease; }
+    .sidebar.open { transform: translateX(0); box-shadow: 4px 0 12px rgba(0,0,0,0.4); }
+    .layout { position: relative; overflow: hidden; }
+  }
+
+  /* レスポンシブ: 600px以下（1カラム） */
+  @media (max-width: 600px) {
+    .mobile-back-btn { display: block; }
+    .middle-pane { width: 100% !important; }
+    .chat-pane { display: none; position: absolute; inset: 0; z-index: 10; }
+    .settings-pane { display: none; position: absolute; inset: 0; z-index: 10; }
+    .layout.mobile-chat-active .middle-pane { display: none; }
+    .layout.mobile-chat-active .chat-pane { display: flex !important; }
+    .tabs { padding-top: env(safe-area-inset-top); }
+    .chat-header { padding: calc(8px + env(safe-area-inset-top)) 10px 8px; }
+    .chat-input-area { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+    .message { max-width: 90%; }
+  }
+
   /* ============================================================
      空状態
      ============================================================ */
@@ -755,6 +797,7 @@
        ============================ -->
   <div class="middle-pane">
     <div class="tabs">
+      <button class="sidebar-toggle">☰</button>
       <div class="tab active" onclick="switchTab('chat')">会話</div>
       <div class="tab" onclick="switchTab('settings')">設定</div>
     </div>
@@ -763,10 +806,13 @@
     <div id="chat-tab-content">
       <div class="new-chat-btn" onclick="newChat()">+ 新規会話</div>
       <div class="conversation-list">
-        <div class="conversation-item active">
+        <div class="conversation-item active process-active">
           <div class="conv-header">
             <span class="conv-date">2026/04/01 15:30</span>
-            <span class="conv-count">(4)</span>
+            <span class="conv-header-right">
+              <span class="conv-count">(4)</span>
+              <span class="process-dot" title="プロセス稼働中"></span>
+            </span>
           </div>
           <div class="conv-title">Phase 1 仕様レビュー</div>
           <div class="conv-preview">Phase 1の仕様書を確認してください</div>
@@ -774,7 +820,10 @@
         <div class="conversation-item">
           <div class="conv-header">
             <span class="conv-date">2026/04/01 14:20</span>
-            <span class="conv-count">(8)</span>
+            <span class="conv-header-right">
+              <span class="conv-count">(8)</span>
+              <span class="process-dot"></span>
+            </span>
           </div>
           <div class="conv-title">旧プロジェクト調査</div>
           <div class="conv-preview">旧プロジェクトの構成を把握して...</div>
@@ -786,7 +835,10 @@
         <div class="conversation-item">
           <div class="conv-header">
             <span class="conv-date">2026/04/01 13:00</span>
-            <span class="conv-count">(2)</span>
+            <span class="conv-header-right">
+              <span class="conv-count">(2)</span>
+              <span class="process-dot"></span>
+            </span>
           </div>
           <div class="conv-preview">こんにちは</div>
         </div>
@@ -828,9 +880,16 @@
        ============================ -->
   <div class="chat-pane" id="chat-pane">
     <div class="chat-header">
-      <span class="chat-title" title="クリックして編集">Phase 1 仕様レビュー</span>
+      <button class="mobile-back-btn">←</button>
+      <div class="chat-title-group">
+        <span class="chat-title" title="クリックして編集">Phase 1 仕様レビュー</span>
+        <select class="header-model-select">
+          <option>Opus</option>
+          <option>Sonnet</option>
+        </select>
+      </div>
       <div class="chat-actions">
-        <button class="chat-action-btn cli">CLI起動</button>
+        <button class="chat-action-btn cli">CLI</button>
         <button class="chat-action-btn hide">非表示</button>
       </div>
     </div>
