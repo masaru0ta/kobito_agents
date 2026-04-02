@@ -20,7 +20,9 @@
   <!-- 中央ペイン: タブ + コンテンツ -->
   <div class="middle-pane" id="middle-pane">
     <div class="tabs">
+      <button class="sidebar-toggle" id="sidebar-toggle" title="エージェント一覧">☰</button>
       <div class="tab active" data-tab="chat">会話</div>
+      <div class="tab" data-tab="tasks">タスク<span class="tab-badge" id="pending-badge" style="display:none;"></span></div>
       <div class="tab" data-tab="settings">設定</div>
     </div>
 
@@ -28,6 +30,11 @@
     <div id="chat-tab-content">
       <div class="new-chat-btn" id="new-chat-btn">+ 新規会話</div>
       <div class="conversation-list" id="conversation-list"></div>
+    </div>
+
+    <!-- タスクタブ -->
+    <div id="tasks-tab-content" style="display:none; flex:1; overflow-y:auto;">
+      <div class="task-list" id="task-list"></div>
     </div>
 
     <!-- 設定タブ -->
@@ -85,6 +92,12 @@
     </div>
   </div>
 
+  <!-- 右ペイン: タスク詳細 -->
+  <div class="task-detail-pane" id="task-detail-pane">
+    <div class="task-detail-header" id="task-detail-header"></div>
+    <div class="task-detail-body" id="task-detail-body"></div>
+  </div>
+
   <!-- 右ペイン: 設定画面 -->
   <div class="settings-pane" id="settings-pane">
     <div class="settings-pane-header">
@@ -103,6 +116,26 @@
     </div>
   </div>
 
+</div>
+
+<!-- タスク: コンテキストメニュー -->
+<div id="task-context-menu" class="context-menu">
+  <div class="context-menu-item" id="ctx-edit">編集</div>
+  <div class="context-menu-item" id="ctx-force-done">強制完了</div>
+  <div class="context-menu-divider"></div>
+  <div class="context-menu-item ctx-danger" id="ctx-delete">削除</div>
+</div>
+
+<!-- タスク: 却下ダイアログ -->
+<div id="task-reject-dialog" class="dialog-overlay">
+  <div class="dialog-box">
+    <h3>タスクを却下</h3>
+    <textarea id="reject-reason" placeholder="却下理由を入力（任意）"></textarea>
+    <div class="dialog-actions">
+      <button class="chat-action-btn" id="reject-cancel">キャンセル</button>
+      <button class="dialog-danger-btn" id="reject-confirm">却下する</button>
+    </div>
+  </div>
 </div>
 
 <script src="/marked.min.js"></script>

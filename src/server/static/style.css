@@ -1,4 +1,5 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
+html { height: 100dvh; overflow: hidden; }
 
 :root {
   --bg-primary: #0d1117;
@@ -173,11 +174,24 @@ body {
 .mobile-back-btn { display: none; padding: 5px 12px; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 .mobile-back-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
 
-/* レスポンシブ: 768px以下 */
-@media (max-width: 768px) {
-  .sidebar { display: none; }
+/* サイドバートグルボタン（デスクトップでは非表示） */
+.sidebar-toggle { display: none; padding: 6px 10px; background: transparent; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; flex-shrink: 0; line-height: 1; }
+.sidebar-toggle:hover { color: var(--text-primary); }
+
+/* レスポンシブ: 中間サイズ（サイドバー折りたたみ可） */
+@media (max-width: 900px) {
+  .sidebar-toggle { display: block; }
   .resize-handle { display: none; }
+  .middle-pane { width: 260px !important; }
+  .sidebar { width: 220px; position: absolute; left: 0; top: 0; bottom: 0; z-index: 20; transform: translateX(-220px); transition: transform 0.25s ease; }
+  .sidebar.open { transform: translateX(0); box-shadow: 4px 0 12px rgba(0,0,0,0.4); }
+  .layout { position: relative; overflow: hidden; }
+}
+
+/* レスポンシブ: 600px以下（1カラム） */
+@media (max-width: 600px) {
   .mobile-back-btn { display: block; }
+  .sidebar { z-index: 30; }
   .tabs { padding-top: env(safe-area-inset-top); }
   .chat-header { padding: calc(8px + env(safe-area-inset-top)) 10px 8px; flex-wrap: nowrap; gap: 6px; }
   .chat-title-group { flex: 1; min-width: 0; gap: 6px; }
@@ -194,6 +208,428 @@ body {
   .layout.mobile-chat-active .settings-pane.visible { display: flex !important; }
   .message { max-width: 90%; }
 }
+
+/* ============================================================
+   タスク管理
+   ============================================================ */
+
+:root {
+  --warning: #d29922;
+}
+
+/* タブバッジ（承認待ち件数） */
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* タスクリスト */
+.task-list { padding: 8px 4px; }
+
+.task-queue-row {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 2px;
+}
+
+.task-order-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.task-queue-row .task-item { flex: 1; margin-bottom: 0; }
+
+.task-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+
+.task-item:hover { background: var(--bg-hover); }
+.task-item.active { background: var(--bg-active); border-color: var(--accent); }
+
+.task-item-indented { margin-left: 32px; }
+
+.task-item-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.task-title-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.task-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* バッジ共通 */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.badge-done { background: #3fb95033; color: var(--success); border: 1px solid var(--success); }
+.badge-pending { background: #d2992233; color: var(--warning); border: 1px solid var(--warning); }
+
+/* ドラッグハンドル */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.drag-handle:hover { color: var(--accent); opacity: 1; }
+.drag-handle:active { cursor: grabbing; }
+
+.task-queue-row.dragging { opacity: 0.4; }
+.task-queue-row.drag-over { border-top: 2px solid var(--accent); }
+
+/* 実行中インジケーター */
+.doing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.doing-indicator .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: task-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes task-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* 完了タスク */
+.task-item.task-last-done { opacity: 0.4; }
+.task-done-history .task-item { opacity: 0.3; }
+
+.task-done-toggle {
+  margin-left: 32px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.task-done-toggle:hover { color: var(--accent); }
+
+/* セパレーター */
+.task-list-divider { margin: 12px 8px 8px; border: none; border-top: 1px solid var(--border); }
+
+/* スケジュール情報 */
+.task-schedule-info { font-size: 11px; color: var(--text-muted); }
+.task-schedule-info .next-run { color: var(--accent); }
+
+/* スケジュールタスク done 状態 */
+.task-item.task-sched-done { opacity: 0.4; }
+
+/* スケジュールトグルバッジ */
+.badge-sched-active {
+  background: #1f6feb33; color: var(--accent); border: 1px solid var(--accent);
+  cursor: pointer; transition: all 0.15s;
+}
+
+.badge-sched-active:hover { background: #f8514918; color: var(--danger); border-color: var(--danger); }
+
+.badge-sched-stopped {
+  background: #f8514918; color: var(--danger); border: 1px solid var(--danger);
+  cursor: pointer; transition: all 0.15s;
+}
+
+.badge-sched-stopped:hover { background: #1f6feb33; color: var(--accent); border-color: var(--accent); }
+
+/* ============================================================
+   タスク詳細ペイン（右ペイン）
+   ============================================================ */
+
+.task-detail-pane {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  min-width: 300px;
+  overflow: hidden;
+}
+
+.task-detail-pane.visible { display: flex; }
+
+.task-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.task-detail-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.task-detail-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-detail-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+
+/* 承認/却下ボタン */
+.approval-btn {
+  padding: 7px 18px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.approval-btn.approve { background: var(--success); color: #fff; }
+.approval-btn.approve:hover { background: #46d160; box-shadow: 0 0 12px #3fb95044; }
+.approval-btn.reject { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+.approval-btn.reject:hover { background: #f8514918; }
+
+/* 承認済み/却下表示 */
+.approval-status-badge {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600;
+  padding: 5px 12px; border-radius: 6px;
+}
+
+.approval-status-badge.approved { color: var(--success); background: #3fb95018; border: 1px solid #3fb95044; }
+.approval-status-badge.rejected { color: var(--danger); background: #f8514918; border: 1px solid #f8514944; }
+
+/* ... メニューボタン */
+.task-more-btn {
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.task-more-btn:hover { border-color: var(--border); color: var(--text-primary); background: var(--bg-hover); }
+
+/* コンテキストメニュー */
+.context-menu {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 200;
+  min-width: 140px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  display: none;
+}
+
+.context-menu.visible { display: block; }
+
+.context-menu-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.context-menu-item:hover { background: var(--bg-hover); }
+.context-menu-item.ctx-danger { color: var(--danger); }
+.context-menu-item.ctx-danger:hover { background: #f8514918; }
+
+.context-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* タスク詳細ボディ */
+.task-detail-body { flex: 1; overflow-y: auto; padding: 24px; }
+
+.task-meta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.task-meta-item { display: flex; align-items: center; gap: 4px; }
+.task-meta-label { color: var(--text-muted); }
+
+/* タスクMDコンテンツ */
+.task-md-content { font-size: 14px; line-height: 1.7; color: var(--text-primary); }
+
+.task-md-content h2 {
+  font-size: 15px; font-weight: 600; color: var(--accent);
+  margin-top: 24px; margin-bottom: 8px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+
+.task-md-content h2:first-child { margin-top: 0; }
+.task-md-content p { margin-bottom: 10px; }
+.task-md-content ol, .task-md-content ul { padding-left: 20px; margin-bottom: 10px; }
+.task-md-content li { margin-bottom: 4px; }
+
+.task-md-content code {
+  background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;
+  font-size: 13px; font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.log-entry {
+  padding: 8px 12px; margin-bottom: 8px;
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+}
+
+.log-entry .log-date { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+
+/* 編集モード */
+.task-edit-textarea {
+  width: 100%; min-height: 300px;
+  padding: 12px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.task-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ダイアログ */
+.dialog-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-overlay.visible { display: flex; }
+
+.dialog-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 400px;
+  max-width: 90vw;
+}
+
+.dialog-box h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+
+.dialog-box textarea {
+  width: 100%; padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-primary); font-size: 13px; font-family: inherit;
+  resize: vertical; outline: none; min-height: 80px; margin-bottom: 16px;
+}
+
+.dialog-box textarea:focus { border-color: var(--accent); }
+
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.dialog-danger-btn {
+  padding: 8px 20px; border-radius: 6px;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  background: var(--danger); border: none; color: #fff;
+  transition: background 0.15s;
+}
+
+.dialog-danger-btn:hover { background: #f97583; }
 
 /* スクロールバー */
 ::-webkit-scrollbar { width: 6px; }

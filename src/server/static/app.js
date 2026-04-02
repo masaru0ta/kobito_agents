@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initResize();
   initInput();
   initActions();
+  initTasks();
+  initResponsive();
 });
 
 // ============================================================
@@ -585,21 +587,31 @@ function switchTab(tabName) {
 
   const chatContent = document.getElementById('chat-tab-content');
   const settingsContent = document.getElementById('settings-tab-content');
+  const tasksContent = document.getElementById('tasks-tab-content');
   const chatPane = document.getElementById('chat-pane');
   const settingsPane = document.getElementById('settings-pane');
+  const taskDetailPane = document.getElementById('task-detail-pane');
+
+  // 中央ペインを切り替え
+  chatContent.style.display = 'none';
+  settingsContent.classList.remove('visible');
+  tasksContent.style.display = 'none';
+
+  // 右ペインを切り替え
+  chatPane.classList.add('hidden');
+  settingsPane.classList.remove('visible');
+  taskDetailPane.classList.remove('visible');
 
   if (tabName === 'chat') {
     chatContent.style.display = '';
-    settingsContent.classList.remove('visible');
     chatPane.classList.remove('hidden');
-    chatPane.style.display = '';
-    settingsPane.classList.remove('visible');
-    settingsPane.style.display = '';
-  } else {
-    chatContent.style.display = 'none';
+  } else if (tabName === 'tasks') {
+    tasksContent.style.display = 'flex';
+    if (currentTaskId) {
+      taskDetailPane.classList.add('visible');
+    }
+  } else if (tabName === 'settings') {
     settingsContent.classList.add('visible');
-    chatPane.classList.add('hidden');
-    chatPane.style.display = 'none';
     settingsPane.classList.add('visible');
     settingsPane.style.display = 'flex';
     loadSettingsData();
@@ -628,11 +640,31 @@ async function loadSettingsData() {
 }
 
 function isMobile() {
-  return window.innerWidth <= 768;
+  return window.innerWidth <= 600;
+}
+
+function initResponsive() {
+  window.addEventListener('resize', () => {
+    if (!isMobile()) {
+      // デスクトップ幅に広がったらモバイル専用クラスを外す
+      document.querySelector('.layout').classList.remove('mobile-chat-active');
+    }
+  });
 }
 
 function initActions() {
   // モバイル: 戻るボタン
+  document.getElementById('sidebar-toggle').addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.toggle('open');
+  });
+  // サイドバー外クリックで閉じる
+  document.querySelector('.layout').addEventListener('click', e => {
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target.id !== 'sidebar-toggle') {
+      sidebar.classList.remove('open');
+    }
+  });
+
   document.getElementById('mobile-back-btn').addEventListener('click', () => {
     document.querySelector('.layout').classList.remove('mobile-chat-active');
   });
@@ -774,6 +806,551 @@ function showToast(message, duration = 4000) {
     toast.classList.remove('toast-visible');
     setTimeout(() => toast.remove(), 300);
   }, duration);
+}
+
+// ============================================================
+// タスク管理（モック実装）
+// ============================================================
+
+let currentTaskId = null;
+let showingDoneHistory = false;
+let taskContextMenuId = null;
+let pendingRejectTaskId = null;
+
+// モックデータ
+const MOCK_TASKS = {
+  task_001: {
+    id: 'task_001', title: 'CLAUDE.mdの編集UIの改善',
+    phase: 'doing', approval: 'approved', type: 'once',
+    created: '2026-04-01T15:00:00Z', agent: 'system',
+    background: 'CLAUDE.mdの編集時にシンタックスハイライトがなく、長文の編集が困難。',
+    policy: ['CodeMirrorを導入してMarkdownのシンタックスハイライトを実現する', 'プレビューペインを追加して編集中にリアルタイムプレビューを表示する'],
+    criteria: ['Markdown記法がハイライト表示される', 'リアルタイムプレビューが表示される'],
+    log: [{date: '2026/04/01 15:30', text: 'CodeMirror 6の導入を完了。基本的なMarkdownハイライトが動作している。'}, {date: '2026/04/01 16:00', text: 'プレビューペインを実装中。スタイル調整が残っている。'}],
+  },
+  task_002: {
+    id: 'task_002', title: 'セッション一覧の読み込み速度改善',
+    phase: 'draft', approval: 'approved', type: 'once',
+    created: '2026-04-01T17:00:00Z', agent: 'system',
+    background: 'セッション数が100を超えるとGET /api/agents/{id}/sessionsの応答が2秒以上かかる。JONLファイルを毎回全件パースしているのが原因。',
+    policy: ['JONLファイルのメタ情報をキャッシュファイルに保存する', '一覧取得時はキャッシュから返し、ファイル更新日時が変わったものだけ再パースする'],
+    criteria: ['セッション500件で一覧取得の応答が200ms以下', 'キャッシュ破損時にフルリビルドできる'],
+    log: [],
+  },
+  task_003: {
+    id: 'task_003', title: 'テストカバレッジの拡充',
+    phase: 'draft', approval: 'approved', type: 'once',
+    created: '2026-04-01T16:00:00Z', agent: 'system',
+    background: '主要コンポーネントのテストカバレッジが低い状態。',
+    policy: ['各コンポーネントのユニットテストを追加する', 'integration testを追加する'],
+    criteria: ['カバレッジ80%以上'],
+    log: [],
+  },
+  task_004: {
+    id: 'task_004', title: 'エージェント登録APIの追加',
+    phase: 'draft', approval: 'pending', type: 'once',
+    created: '2026-04-01T16:30:00Z', agent: 'system',
+    background: '現在エージェントはagents.jsonを直接編集して追加するしかない。Web UIから追加できるようにする。',
+    policy: ['POST /api/agents エンドポイントを追加する', 'UIにエージェント追加フォームを追加する'],
+    criteria: ['UIからエージェントを登録できる'],
+    log: [],
+  },
+  task_005: {
+    id: 'task_005', title: 'Codex対応の調査',
+    phase: 'draft', approval: 'pending', type: 'once',
+    created: '2026-04-01T18:00:00Z', agent: 'system',
+    background: 'Phase 1ではClaude Codeのみ対応。Codexへの対応が未実装。',
+    policy: ['Codex APIの仕様を調査する', 'CodexSessionReaderの設計案を作成する'],
+    criteria: ['調査レポートを作成する'],
+    log: [],
+  },
+  task_006: {
+    id: 'task_006', title: 'ConfigManagerの実装',
+    phase: 'done', approval: 'approved', type: 'once',
+    created: '2026-03-31T10:00:00Z', agent: 'system',
+    background: '', policy: [], criteria: [], log: [],
+  },
+  task_007: {
+    id: 'task_007', title: 'SessionReaderの実装',
+    phase: 'done', approval: 'approved', type: 'once',
+    created: '2026-03-30T16:00:00Z', agent: 'system',
+    background: '', policy: [], criteria: [], log: [],
+  },
+  task_008: {
+    id: 'task_008', title: 'プロジェクト初期構成',
+    phase: 'done', approval: 'approved', type: 'once',
+    created: '2026-03-29T11:00:00Z', agent: 'system',
+    background: '', policy: [], criteria: [], log: [],
+  },
+  task_sched_001: {
+    id: 'task_sched_001', title: '日次レポート生成',
+    phase: 'done', approval: 'approved', type: 'scheduled',
+    schedule: '毎日 09:00', schedActive: true, nextRun: '04/02 09:00',
+    created: '2026-04-01T09:00:00Z', agent: 'system',
+    background: '毎日の作業ログとセッション統計を集計してレポートを生成する。',
+    policy: ['セッション一覧から当日のデータを集計する', 'Markdownレポートとして保存する'],
+    criteria: ['毎日09:00に自動生成される'],
+    log: [{date: '2026/04/01 09:05', text: 'レポートを生成しました。本日のセッション数: 3件。'}],
+  },
+  task_sched_002: {
+    id: 'task_sched_002', title: '週次コードレビュー',
+    phase: 'draft', approval: 'approved', type: 'scheduled',
+    schedule: '毎週 月曜 10:00', schedActive: true, nextRun: null,
+    created: '2026-04-01T10:00:00Z', agent: 'system',
+    background: '週に一度、先週のコード変更を振り返りレビューする。',
+    policy: ['git logから直近1週間の変更を取得する', '変更内容を分析してレポートを作成する'],
+    criteria: ['レビューレポートが生成される'],
+    log: [],
+  },
+  task_sched_003: {
+    id: 'task_sched_003', title: '月次依存パッケージ更新確認',
+    phase: 'done', approval: 'approved', type: 'scheduled',
+    schedule: '毎月 1日 09:00', schedActive: false, nextRun: '05/01 09:00',
+    created: '2026-04-01T09:00:00Z', agent: 'system',
+    background: 'パッケージの脆弱性・更新情報を月次で確認する。',
+    policy: ['pip listでインストール済みパッケージを確認する', '更新が必要なものを報告する'],
+    criteria: ['更新確認レポートが生成される'],
+    log: [],
+  },
+};
+
+// 実行キューの順序（承認済みonce typeのタスクID順）
+let taskExecutionOrder = ['task_001', 'task_002', 'task_003'];
+
+function initTasks() {
+  renderTaskList();
+  updatePendingBadge();
+
+  // コンテキストメニューの外クリックで閉じる
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('task-context-menu');
+    if (!menu.contains(e.target) && !e.target.classList.contains('task-more-btn')) {
+      menu.classList.remove('visible');
+    }
+  });
+
+  // コンテキストメニュー項目
+  document.getElementById('ctx-edit').addEventListener('click', () => {
+    document.getElementById('task-context-menu').classList.remove('visible');
+    enterTaskEditMode();
+  });
+
+  document.getElementById('ctx-force-done').addEventListener('click', () => {
+    document.getElementById('task-context-menu').classList.remove('visible');
+    if (!taskContextMenuId) return;
+    const task = MOCK_TASKS[taskContextMenuId];
+    if (task) { task.phase = 'done'; renderTaskList(); renderTaskDetail(taskContextMenuId); }
+  });
+
+  document.getElementById('ctx-delete').addEventListener('click', () => {
+    document.getElementById('task-context-menu').classList.remove('visible');
+    if (!taskContextMenuId) return;
+    if (!confirm(`「${MOCK_TASKS[taskContextMenuId]?.title}」を削除しますか？`)) return;
+    delete MOCK_TASKS[taskContextMenuId];
+    taskExecutionOrder = taskExecutionOrder.filter(id => id !== taskContextMenuId);
+    currentTaskId = null;
+    renderTaskList();
+    updatePendingBadge();
+    document.getElementById('task-detail-pane').classList.remove('visible');
+  });
+
+  // 却下ダイアログ
+  document.getElementById('reject-cancel').addEventListener('click', hideRejectDialog);
+  document.getElementById('reject-confirm').addEventListener('click', () => {
+    if (!pendingRejectTaskId) return;
+    const task = MOCK_TASKS[pendingRejectTaskId];
+    if (task) { task.approval = 'rejected'; }
+    hideRejectDialog();
+    renderTaskList();
+    renderTaskDetail(pendingRejectTaskId);
+    updatePendingBadge();
+  });
+}
+
+function updatePendingBadge() {
+  const count = Object.values(MOCK_TASKS).filter(t => t.approval === 'pending').length;
+  const badge = document.getElementById('pending-badge');
+  if (count > 0) {
+    badge.textContent = count;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function renderTaskList() {
+  const list = document.getElementById('task-list');
+  let html = '';
+
+  // 実行キュー（承認済みonce type、taskExecutionOrderに従う）
+  taskExecutionOrder.forEach((id, i) => {
+    const task = MOCK_TASKS[id];
+    if (!task || task.type !== 'once' || task.approval !== 'approved') return;
+    const isFirst = i === 0;
+    const active = id === currentTaskId ? ' active' : '';
+    const indicator = isFirst
+      ? '<span class="doing-indicator"><span class="dot"></span>実行中</span>'
+      : '';
+    html += `
+      <div class="task-queue-row" data-row-id="${id}">
+        <span class="task-order-num">${i + 1}</span>
+        <div class="task-item draggable${active}" data-task-id="${id}" draggable="true">
+          <div class="task-item-header">
+            <span class="drag-handle">&#x2630;</span>
+            <div class="task-title-group">
+              <span class="task-item-title">${escapeHtml(task.title)}</span>
+              ${indicator}
+            </div>
+          </div>
+          <div class="task-item-meta">
+            <span>${formatTaskDate(task.created)}</span>
+          </div>
+        </div>
+      </div>`;
+  });
+
+  // 承認待ち
+  const pendingTasks = Object.values(MOCK_TASKS).filter(t => t.type === 'once' && t.approval === 'pending');
+  pendingTasks.forEach(task => {
+    const active = task.id === currentTaskId ? ' active' : '';
+    html += `
+      <div class="task-item task-item-indented${active}" data-task-id="${task.id}">
+        <div class="task-item-header">
+          <div class="task-title-group">
+            <span class="task-item-title">${escapeHtml(task.title)}</span>
+            <span class="badge badge-pending">承認待ち</span>
+          </div>
+        </div>
+        <div class="task-item-meta">
+          <span>${formatTaskDate(task.created)}</span>
+        </div>
+      </div>`;
+  });
+
+  // 却下済み（一応表示）
+  const rejectedTasks = Object.values(MOCK_TASKS).filter(t => t.type === 'once' && t.approval === 'rejected');
+  rejectedTasks.forEach(task => {
+    const active = task.id === currentTaskId ? ' active' : '';
+    html += `
+      <div class="task-item task-item-indented${active}" data-task-id="${task.id}" style="opacity:0.4;">
+        <div class="task-item-header">
+          <div class="task-title-group">
+            <span class="task-item-title">${escapeHtml(task.title)}</span>
+            <span class="badge" style="background:#f8514933;color:var(--danger);border:1px solid var(--danger);">却下</span>
+          </div>
+        </div>
+        <div class="task-item-meta"><span>${formatTaskDate(task.created)}</span></div>
+      </div>`;
+  });
+
+  // 完了タスク（最新1件 + 履歴）
+  const doneTasks = Object.values(MOCK_TASKS)
+    .filter(t => t.type === 'once' && t.phase === 'done' && t.approval === 'approved')
+    .sort((a, b) => b.created.localeCompare(a.created));
+
+  if (doneTasks.length > 0) {
+    const latest = doneTasks[0];
+    const active = latest.id === currentTaskId ? ' active' : '';
+    html += `
+      <div class="task-item task-item-indented task-last-done${active}" data-task-id="${latest.id}">
+        <div class="task-item-header">
+          <div class="task-title-group">
+            <span class="task-item-title">${escapeHtml(latest.title)}</span>
+            <span class="badge badge-done">done</span>
+          </div>
+        </div>
+        <div class="task-item-meta"><span>${formatTaskDate(latest.created)} 完了</span></div>
+      </div>`;
+
+    if (doneTasks.length > 1) {
+      const histItems = doneTasks.slice(1).map(task => {
+        const a = task.id === currentTaskId ? ' active' : '';
+        return `
+          <div class="task-item task-item-indented${a}" data-task-id="${task.id}">
+            <div class="task-item-header">
+              <div class="task-title-group">
+                <span class="task-item-title">${escapeHtml(task.title)}</span>
+                <span class="badge badge-done">done</span>
+              </div>
+            </div>
+            <div class="task-item-meta"><span>${formatTaskDate(task.created)} 完了</span></div>
+          </div>`;
+      }).join('');
+
+      html += `
+        <div class="task-done-history" id="task-done-history" style="${showingDoneHistory ? '' : 'display:none;'}">
+          ${histItems}
+        </div>
+        <div class="task-done-toggle" id="task-done-toggle">
+          ${showingDoneHistory ? '過去の完了タスクを隠す' : `過去の完了タスクを表示 (${doneTasks.length - 1})`}
+        </div>`;
+    }
+  }
+
+  // HR
+  html += '<hr class="task-list-divider">';
+
+  // スケジュールタスク
+  const scheduledTasks = Object.values(MOCK_TASKS).filter(t => t.type === 'scheduled');
+  scheduledTasks.forEach(task => {
+    const active = task.id === currentTaskId ? ' active' : '';
+    const isDone = task.phase === 'done';
+    const schedBadge = task.schedActive
+      ? `<span class="badge badge-sched-active" data-sched-id="${task.id}">定期実行</span>`
+      : `<span class="badge badge-sched-stopped" data-sched-id="${task.id}">停止中</span>`;
+    const nextRunHtml = task.nextRun
+      ? `&nbsp;›&nbsp;<span class="next-run">次回 ${task.nextRun}</span>`
+      : '';
+    html += `
+      <div class="task-item task-item-indented${isDone ? ' task-sched-done' : ''}${active}" data-task-id="${task.id}">
+        <div class="task-item-header">
+          <div class="task-title-group">
+            <span class="task-item-title">${escapeHtml(task.title)}</span>
+            ${isDone ? '<span class="badge badge-done">done</span>' : ''}
+            ${schedBadge}
+          </div>
+        </div>
+        <div class="task-item-meta">
+          <span class="task-schedule-info">${task.schedule}${nextRunHtml}</span>
+        </div>
+      </div>`;
+  });
+
+  list.innerHTML = html;
+
+  // クリックイベント
+  list.querySelectorAll('.task-item[data-task-id]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.drag-handle') || e.target.closest('[data-sched-id]')) return;
+      selectTask(el.dataset.taskId);
+    });
+  });
+
+  // スケジュールトグル
+  list.querySelectorAll('[data-sched-id]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = el.dataset.schedId;
+      const task = MOCK_TASKS[id];
+      if (!task) return;
+      task.schedActive = !task.schedActive;
+      renderTaskList();
+      if (currentTaskId === id) renderTaskDetail(id);
+    });
+  });
+
+  // 完了履歴トグル
+  const toggleEl = document.getElementById('task-done-toggle');
+  if (toggleEl) {
+    toggleEl.addEventListener('click', () => {
+      showingDoneHistory = !showingDoneHistory;
+      renderTaskList();
+    });
+  }
+
+  // ドラッグ&ドロップ（実行キュー）
+  initTaskDragDrop();
+}
+
+function selectTask(taskId) {
+  currentTaskId = taskId;
+  renderTaskList();
+
+  // 右ペインをタスク詳細に切り替え
+  document.getElementById('chat-pane').classList.add('hidden');
+  document.getElementById('settings-pane').classList.remove('visible');
+  document.getElementById('task-detail-pane').classList.add('visible');
+
+  renderTaskDetail(taskId);
+}
+
+function renderTaskDetail(taskId) {
+  const task = MOCK_TASKS[taskId];
+  if (!task) return;
+
+  // ヘッダー
+  const headerEl = document.getElementById('task-detail-header');
+  let approvalHtml = '';
+  if (task.approval === 'pending') {
+    approvalHtml = `
+      <button class="approval-btn approve" data-approve="${taskId}">承認</button>
+      <button class="approval-btn reject" data-reject="${taskId}">却下</button>`;
+  } else if (task.approval === 'approved') {
+    approvalHtml = `<div class="approval-status-badge approved">✓ 承認済み</div>`;
+  } else if (task.approval === 'rejected') {
+    approvalHtml = `<div class="approval-status-badge rejected">✗ 却下</div>`;
+  }
+
+  const phaseBadgeMap = { draft: '', doing: '<span class="doing-indicator"><span class="dot"></span>実行中</span>', done: '<span class="badge badge-done">done</span>' };
+  const phaseBadge = phaseBadgeMap[task.phase] || '';
+
+  headerEl.innerHTML = `
+    <div class="task-detail-header-left">
+      ${phaseBadge}
+      <span class="task-detail-title">${escapeHtml(task.title)}</span>
+    </div>
+    <div class="task-detail-actions">
+      ${approvalHtml}
+      <button class="task-more-btn" data-more="${taskId}" title="その他">&#x22EF;</button>
+    </div>`;
+
+  // 承認/却下ボタンのイベント
+  headerEl.querySelector(`[data-approve="${taskId}"]`)?.addEventListener('click', () => {
+    task.approval = 'approved';
+    taskExecutionOrder.push(taskId);
+    renderTaskList();
+    renderTaskDetail(taskId);
+    updatePendingBadge();
+  });
+
+  headerEl.querySelector(`[data-reject="${taskId}"]`)?.addEventListener('click', () => {
+    pendingRejectTaskId = taskId;
+    showRejectDialog();
+  });
+
+  // ... メニューボタン
+  headerEl.querySelector(`[data-more="${taskId}"]`)?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    taskContextMenuId = taskId;
+    const menu = document.getElementById('task-context-menu');
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+    menu.style.left = '';
+    menu.classList.toggle('visible');
+    // 完了済みなら強制完了を無効化
+    document.getElementById('ctx-force-done').style.opacity = task.phase === 'done' ? '0.4' : '';
+    document.getElementById('ctx-force-done').style.pointerEvents = task.phase === 'done' ? 'none' : '';
+  });
+
+  // ボディ
+  const bodyEl = document.getElementById('task-detail-body');
+  const created = new Date(task.created).toLocaleString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+
+  let contentHtml = '';
+  if (task.background) {
+    contentHtml += `<h2>背景</h2><p>${escapeHtml(task.background)}</p>`;
+  }
+  if (task.policy && task.policy.length > 0) {
+    contentHtml += `<h2>方針</h2><ol>${task.policy.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ol>`;
+  }
+  if (task.criteria && task.criteria.length > 0) {
+    contentHtml += `<h2>完了条件</h2><ul>${task.criteria.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>`;
+  }
+  if (task.log && task.log.length > 0) {
+    contentHtml += `<h2>作業ログ</h2>${task.log.map(l => `<div class="log-entry"><div class="log-date">${escapeHtml(l.date)}</div>${escapeHtml(l.text)}</div>`).join('')}`;
+  }
+
+  bodyEl.innerHTML = `
+    <div class="task-meta-bar">
+      <div class="task-meta-item"><span class="task-meta-label">ID:</span><span>${escapeHtml(task.id)}</span></div>
+      <div class="task-meta-item"><span class="task-meta-label">担当:</span><span>${escapeHtml(task.agent)}</span></div>
+      <div class="task-meta-item"><span class="task-meta-label">起票:</span><span>${created}</span></div>
+      ${task.type === 'scheduled' ? `<div class="task-meta-item"><span class="task-meta-label">スケジュール:</span><span>${escapeHtml(task.schedule)}</span></div>` : ''}
+    </div>
+    <div class="task-md-content">${contentHtml}</div>`;
+}
+
+function enterTaskEditMode() {
+  const task = MOCK_TASKS[currentTaskId];
+  if (!task) return;
+
+  // 本文を textarea に変換
+  const bodyEl = document.getElementById('task-detail-body');
+  const content = [
+    task.background ? `## 背景\n${task.background}` : '',
+    task.policy?.length ? `## 方針\n${task.policy.map((p, i) => `${i+1}. ${p}`).join('\n')}` : '',
+    task.criteria?.length ? `## 完了条件\n${task.criteria.map(c => `- ${c}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  // meta-bar は維持しつつ md-content を textarea に置き換え
+  const mdContent = bodyEl.querySelector('.task-md-content');
+  if (mdContent) {
+    mdContent.innerHTML = `
+      <textarea class="task-edit-textarea" id="task-edit-textarea">${escapeHtml(content)}</textarea>
+      <div class="task-edit-actions">
+        <button class="chat-action-btn" id="task-edit-cancel">キャンセル</button>
+        <button class="settings-save-btn" id="task-edit-save">保存</button>
+      </div>`;
+
+    document.getElementById('task-edit-cancel').addEventListener('click', () => {
+      renderTaskDetail(currentTaskId);
+    });
+
+    document.getElementById('task-edit-save').addEventListener('click', () => {
+      // 簡易パース: 背景/方針/完了条件を抽出して保存
+      const text = document.getElementById('task-edit-textarea').value;
+      task.background = extractSection(text, '背景') || task.background;
+      const policyText = extractSection(text, '方針');
+      if (policyText) task.policy = policyText.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
+      const criteriaText = extractSection(text, '完了条件');
+      if (criteriaText) task.criteria = criteriaText.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
+      renderTaskDetail(currentTaskId);
+    });
+  }
+}
+
+function extractSection(text, heading) {
+  const re = new RegExp(`##\\s+${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`);
+  const m = text.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function formatTaskDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).replace(/\//g, '/');
+}
+
+function showRejectDialog() {
+  document.getElementById('reject-reason').value = '';
+  document.getElementById('task-reject-dialog').classList.add('visible');
+}
+
+function hideRejectDialog() {
+  document.getElementById('task-reject-dialog').classList.remove('visible');
+  pendingRejectTaskId = null;
+}
+
+function initTaskDragDrop() {
+  let dragRowId = null;
+
+  document.querySelectorAll('.task-queue-row').forEach(row => {
+    const item = row.querySelector('.task-item.draggable');
+    if (!item) return;
+
+    item.addEventListener('dragstart', (e) => {
+      dragRowId = row.dataset.rowId;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    item.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      document.querySelectorAll('.task-queue-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+      dragRowId = null;
+    });
+
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (row.dataset.rowId === dragRowId) return;
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drag-over');
+    });
+
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (!dragRowId || row.dataset.rowId === dragRowId) return;
+      const fromIdx = taskExecutionOrder.indexOf(dragRowId);
+      const toIdx = taskExecutionOrder.indexOf(row.dataset.rowId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      taskExecutionOrder.splice(fromIdx, 1);
+      taskExecutionOrder.splice(toIdx, 0, dragRowId);
+      renderTaskList();
+    });
+  });
 }
 
 function escapeHtml(text) {
