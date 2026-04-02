@@ -4,6 +4,7 @@ const API = '/api';
 let currentAgentId = null;
 let currentSessionId = null;
 let agents = [];
+let sessions = [];
 let sessionStates = {}; // { sessionId: 'idle' | 'waiting' | 'streaming' }
 let sessionModelTiers = {}; // { sessionId: 'deep' | 'quick' }
 let activeProcessSessions = new Set(); // 常駐プロセスが稼働中のセッションID
@@ -12,6 +13,7 @@ let processStatusInterval = null;
 let lastDirMtime = 0;     // セッションディレクトリの前回mtime
 let lastWatchingMtime = 0; // 表示中セッションJSONLの前回mtime
 let lastStartupId = null;  // サーバー起動IDキャッシュ（変化でリロード検知）
+const sessionDomCache = {}; // { sessionId: { el: HTMLElement, stale: boolean } } セッションDOMキャッシュ
 
 // ============================================================
 // 初期化
@@ -69,6 +71,9 @@ async function selectAgent(agentId) {
   if (agent) updateModelSelect(agent);
   // プロセスステータスのポーリングを開始
   startProcessStatusPolling();
+  // タスク詳細を閉じてタスク一覧を読み込む
+  backToTaskList();
+  await loadTasks();
 }
 
 async function pollProcessStatus() {
@@ -91,6 +96,10 @@ async function pollProcessStatus() {
       lastStartupId = data.startup_id;
     }
 
+    // バックエンドで応答が完了したセッションの残留インジケーターを除去
+    // （SSEストリームが切断等で thinkingEl が残ったまま responding=false になった場合）
+    const prevResponding = respondingSessions;
+
     // プロセス稼働ドット更新
     activeProcessSessions = new Set(data.active);
     document.querySelectorAll('.conversation-item').forEach(el => {
@@ -100,6 +109,14 @@ async function pollProcessStatus() {
 
     // バックエンド応答中セッションを確認し、フロントが見逃しているものを補完
     respondingSessions = new Set(data.responding);
+    // 前回 responding だったが今回なくなったセッション → 残留 thinkingEl を除去
+    prevResponding.forEach(sid => {
+      if (!respondingSessions.has(sid) && !sessionStates[sid]) {
+        const container = getSessionContainer(sid);
+        const ind = container.querySelector('.thinking-indicator');
+        if (ind) { ind._stopTimer?.(); ind.remove(); }
+      }
+    });
     respondingSessions.forEach(sid => {
       if (!sessionStates[sid]) {
         sessionStates[sid] = 'streaming';
@@ -111,19 +128,37 @@ async function pollProcessStatus() {
           div.innerHTML = '<div class="spinner"></div><span class="label">応答待ち</span>';
           el.appendChild(div);
         }
+        // 現在表示中のセッションなら、会話ウィンドウにも thinkingEl を復元
+        if (sid === currentSessionId) {
+          const container = getSessionContainer(sid);
+          if (!container.querySelector('.thinking-indicator')) {
+            appendThinking();
+          }
+        }
       }
     });
 
-    // セッションディレクトリ変化 → 一覧を再取得
+    // セッションディレクトリ変化 → 一覧を再取得 + 現在表示中以外のキャッシュを無効化
     if (data.dir_mtime && data.dir_mtime !== lastDirMtime) {
-      if (lastDirMtime !== 0) await loadSessions();
+      if (lastDirMtime !== 0) {
+        // 現在表示中以外のキャッシュを stale にする（表示中は後続の watching_mtime で対処）
+        Object.entries(sessionDomCache).forEach(([key, cache]) => {
+          if (key !== currentSessionId) cache.stale = true;
+        });
+        await loadSessions();
+      }
       lastDirMtime = data.dir_mtime;
     }
 
-    // 表示中セッション変化 → 履歴を再取得（自分がストリーミング中でなければ）
+    // 表示中セッション変化 → 履歴を強制再取得
+    // 再起動待機中(restart-waiting)も含む。アクティブストリーミング中(streaming/waiting)は除く
     if (data.watching_mtime && data.watching_mtime !== lastWatchingMtime) {
-      if (lastWatchingMtime !== 0 && !sessionStates[currentSessionId]) {
-        await loadSessionHistory(currentSessionId);
+      const st = sessionStates[currentSessionId];
+      const canReload = !st || st === 'restart-waiting';
+      if (lastWatchingMtime !== 0 && canReload) {
+        delete sessionStates[currentSessionId]; // 再起動待機状態を解除
+        await loadSessionHistory(currentSessionId, true);
+        await loadSessions();
       }
       lastWatchingMtime = data.watching_mtime;
     }
@@ -134,8 +169,9 @@ function startProcessStatusPolling() {
   if (processStatusInterval) clearInterval(processStatusInterval);
   activeProcessSessions = new Set();
   respondingSessions = new Set();
-  pollProcessStatus();
-  processStatusInterval = setInterval(pollProcessStatus, 5000);
+  const poll = () => { pollProcessStatus(); loadTasks(); };
+  poll();
+  processStatusInterval = setInterval(poll, 5000);
 }
 
 // ============================================================
@@ -147,7 +183,7 @@ async function loadSessions() {
   // フェッチ開始時点のsessionStatesスナップショットを取る（非同期競合対策）
   const stateSnapshot = { ...sessionStates };
   const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
-  const sessions = await resp.json();
+  sessions = await resp.json();
   renderSessions(sessions, stateSnapshot);
 }
 
@@ -164,7 +200,9 @@ function renderSessions(sessions, stateSnapshot) {
       hour: '2-digit', minute: '2-digit',
     });
     const state = states[s.session_id];
-    const statusHtml = state === 'waiting' || state === 'streaming'
+    // sessionStates（フロント管理）またはrespondingSessions（バックエンド実態）のどちらかが応答中なら表示
+    const isResponding = state === 'waiting' || state === 'streaming' || state === 'restart-waiting' || respondingSessions.has(s.session_id);
+    const statusHtml = isResponding
       ? '<div class="conv-status"><div class="spinner"></div><span class="label">応答待ち</span></div>'
       : '';
     const titleHtml = s.title
@@ -195,6 +233,8 @@ function renderSessions(sessions, stateSnapshot) {
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
   lastWatchingMtime = 0; // セッション切替時にリセット
+  // キャッシュされたコンテナを即時表示（切替を高速化）
+  activateSessionContainer(sessionId);
   // モバイル: チャット画面に切り替え
   if (isMobile()) {
     document.querySelector('.layout').classList.add('mobile-chat-active');
@@ -232,11 +272,20 @@ async function selectSession(sessionId) {
 
 let currentSessionTitle = '';
 
-async function loadSessionHistory(sessionId) {
+async function loadSessionHistory(sessionId, force = false) {
   if (!currentAgentId || !sessionId) return;
+  const cache = sessionDomCache[sessionId];
+
+  // キャッシュが有効 (stale でない) 場合はメッセージ再取得をスキップ
+  if (!force && cache && !cache.stale) {
+    cache.el.scrollTop = cache.el.scrollHeight;
+    document.getElementById('chat-title').textContent = currentSessionTitle || '';
+    return;
+  }
+
   const resp = await fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}`);
   const messages = await resp.json();
-  renderMessages(messages);
+  renderMessages(messages, sessionId);
 
   // セッション一覧からタイトルを取得
   const sessResp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
@@ -247,13 +296,17 @@ async function loadSessionHistory(sessionId) {
   const date = messages.length > 0
     ? new Date(messages[0].timestamp).toLocaleString('ja-JP')
     : '';
-  const titleEl = document.getElementById('chat-title');
-  titleEl.textContent = currentSessionTitle || (date ? `${date} の会話` : '');
+  document.getElementById('chat-title').textContent = currentSessionTitle || (date ? `${date} の会話` : '');
 }
 
-function renderMessages(messages) {
-  const container = document.getElementById('chat-messages');
+function renderMessages(messages, sessionId) {
+  const container = getSessionContainer(sessionId || currentSessionId);
+  // innerHTML クリア前に残留 thinkingEl のタイマーを停止
+  container.querySelectorAll('.thinking-indicator').forEach(el => el._stopTimer?.());
   container.innerHTML = '';
+  // キャッシュを有効にマーク
+  const cacheKey = sessionId || currentSessionId;
+  if (sessionDomCache[cacheKey]) sessionDomCache[cacheKey].stale = false;
 
   const agent = agents.find(a => a.id === currentAgentId);
   const agentName = agent ? agent.name : '';
@@ -320,7 +373,9 @@ function applyModelSelectStyle(sel) {
 }
 
 function clearChat() {
-  document.getElementById('chat-messages').innerHTML = '';
+  // エージェント切替・非表示等: キャッシュを全消去
+  Object.values(sessionDomCache).forEach(c => c.el.remove());
+  Object.keys(sessionDomCache).forEach(k => delete sessionDomCache[k]);
   document.getElementById('chat-title').textContent = '';
   currentSessionTitle = '';
 }
@@ -379,6 +434,75 @@ function initInput() {
   });
 }
 
+async function openTalkSession(taskId) {
+  const task = tasksCache[taskId];
+  if (!task) return;
+
+  // 既存の相談セッションがあれば開く
+  if (task.talk_session_id) {
+    switchTab('chat');
+    await selectSession(task.talk_session_id);
+    return;
+  }
+
+  // 送信前のセッション一覧を記録
+  const prevSessionIds = new Set(sessions.map(s => s.session_id));
+
+  // 新規セッションを作成して送信
+  currentSessionId = null;
+  clearChat();
+  activateSessionContainer(null);
+  document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+  switchTab('chat');
+
+  const input = document.getElementById('chat-input');
+  input.value = `タスク「${task.title}」について話したい。`;
+  await sendMessage();
+
+  // 送信後のセッション一覧から新規セッションを特定
+  await loadSessions();
+  const newSession = sessions.find(s => !prevSessionIds.has(s.session_id));
+  if (!newSession) return;
+
+  const sid = newSession.session_id;
+  await fetch(`${API}/agents/${currentAgentId}/sessions/${sid}/title`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: `${task.title} の相談` }),
+  });
+  await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/talk-session`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sid }),
+  });
+  await loadSessions();
+  await loadTasks();
+  await selectSession(sid);
+}
+
+async function startWorkSession(taskId, message) {
+  const task = tasksCache[taskId];
+  if (!task) return;
+
+  currentSessionId = null;
+  clearChat();
+  activateSessionContainer(null);
+  document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+  switchTab('chat');
+
+  const input = document.getElementById('chat-input');
+  input.value = message;
+  await sendMessage();
+
+  if (currentSessionId) {
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: currentSessionId }),
+    });
+  }
+}
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
@@ -387,12 +511,15 @@ async function sendMessage() {
   input.value = '';
 
   // 送信時のセッションIDを記憶（別セッションに切り替わっても追跡できるように）
-  const sentSessionId = currentSessionId;
+  let sentSessionId = currentSessionId;
   const sentAgentId = currentAgentId;
 
   // 現在のセッションを表示中かどうか判定するヘルパー
   const isViewingThisSession = () =>
     currentAgentId === sentAgentId && currentSessionId === sentSessionId;
+
+  // 送信先セッションのコンテナを確実に表示（新規セッション含む）
+  activateSessionContainer(sentSessionId);
 
   // ユーザーメッセージを即座に表示
   appendMessage('user', message);
@@ -422,6 +549,9 @@ async function sendMessage() {
 
     sessionStates[sentSessionId || 'new'] = 'streaming';
 
+    // ストリーミング書き込み先コンテナ（キャッシュから取得）
+    let streamContainer = getSessionContainer(sentSessionId);
+
     // バブルは最初のチャンクが来た時点で作成する（それまで考え中表示を維持）
     let bubbleEl = null;
 
@@ -438,20 +568,18 @@ async function sendMessage() {
             if (event.type === 'chunk') {
               fullResponse = event.data;
               if (isViewingThisSession()) {
-                const container = document.getElementById('chat-messages');
                 if (!bubbleEl) {
                   bubbleEl = appendMessage('assistant', '');
                 }
                 bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
                 // thinkingElを常に末尾に移動してスクロールアウトを防ぐ
-                if (thinkingEl.parentNode) container.appendChild(thinkingEl);
+                if (thinkingEl.parentNode) streamContainer.appendChild(thinkingEl);
               }
             } else if (event.type === 'tool_use') {
               if (isViewingThisSession()) {
-                const container = document.getElementById('chat-messages');
                 appendToolUse(event.data);
                 // tool_use追加後もthinkingElを末尾に移動
-                if (thinkingEl.parentNode) container.appendChild(thinkingEl);
+                if (thinkingEl.parentNode) streamContainer.appendChild(thinkingEl);
               }
             } else if (event.type === 'error') {
               streamError = event.data;
@@ -470,7 +598,15 @@ async function sendMessage() {
               }
               // 新規セッションのID: ユーザーがまだこのセッションを見ている場合のみ更新
               if (isViewingThisSession()) {
+                // DOMキャッシュのキーを 旧sentSessionId → newSessionId に移動
+                const oldKey = sentSessionId || 'new';
                 currentSessionId = newSessionId;
+                sentSessionId = newSessionId; // isViewingThisSession()が以降もtrueを返すように同期
+                if (sessionDomCache[oldKey] && !sessionDomCache[newSessionId]) {
+                  sessionDomCache[newSessionId] = sessionDomCache[oldKey];
+                  delete sessionDomCache[oldKey];
+                  streamContainer = sessionDomCache[newSessionId].el;
+                }
               }
             }
           } catch (e) { /* 不正なJSON行は無視 */ }
@@ -478,23 +614,36 @@ async function sendMessage() {
       }
       // スクロールは表示中のセッションのみ
       if (isViewingThisSession()) {
-        document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+        streamContainer.scrollTop = streamContainer.scrollHeight;
       }
     }
 
-    // エラーの場合：メッセージ表示 + セッション履歴を再取得して正しい状態に復元
+    // エラーの場合
     if (streamError) {
-      if (thinkingEl.parentNode) thinkingEl.remove();
-      if (isViewingThisSession()) {
-        appendMessage('assistant', `エラー: ${streamError}`);
-      }
-      delete sessionStates[sentSessionId || 'new'];
-      if (newSessionId) delete sessionStates['new'];
+      const isRestartError = streamError.includes('再起動');
       const resolvedSid = newSessionId || sentSessionId;
-      if (resolvedSid) {
+
+      if (isRestartError) {
+        // サーバー再起動エラー: CLIサブプロセスは生き続けている可能性があるため
+        // インジケーターを消さず継続待機（watching_mtime でファイル変化を検知して自動解除）
+        showToast('サーバーが再起動されました。応答を受信待ちです...');
+        // 'restart-waiting' 状態にする（session一覧表示は維持、watching_mtimeで再取得可能にする）
+        sessionStates[sentSessionId || 'new'] = 'restart-waiting';
         await loadSessions();
-        if (currentAgentId === sentAgentId && currentSessionId === resolvedSid) {
-          await loadSessionHistory(resolvedSid);
+        // thinkingEl はそのまま残す（ポーリングの watching_mtime 検知で自動解除）
+      } else {
+        // 通常エラー: インジケーターを消してエラーメッセージを表示
+        if (thinkingEl.parentNode) { thinkingEl._stopTimer?.(); thinkingEl.remove(); }
+        if (isViewingThisSession()) {
+          appendMessage('assistant', `エラー: ${streamError}`);
+        }
+        delete sessionStates[sentSessionId || 'new'];
+        if (newSessionId) delete sessionStates['new'];
+        if (resolvedSid) {
+          await loadSessions();
+          if (currentAgentId === sentAgentId && currentSessionId === resolvedSid) {
+            await loadSessionHistory(resolvedSid);
+          }
         }
       }
       return;
@@ -511,11 +660,13 @@ async function sendMessage() {
 
     // ユーザーが別セッションを見ていた場合、考え中表示がまだDOMに残っている可能性
     if (thinkingEl.parentNode) {
+      thinkingEl._stopTimer?.();
       thinkingEl.remove();
     }
 
   } catch (e) {
     if (thinkingEl.parentNode) {
+      thinkingEl._stopTimer?.();
       thinkingEl.remove();
     }
     delete sessionStates[sentSessionId || 'new'];
@@ -536,7 +687,7 @@ async function sendMessage() {
 }
 
 function appendMessage(role, content) {
-  const container = document.getElementById('chat-messages');
+  const container = getSessionContainer(currentSessionId);
   const agent = agents.find(a => a.id === currentAgentId);
   const sender = role === 'user' ? 'あなた' : (agent ? agent.name : '');
   const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
@@ -554,21 +705,59 @@ function appendMessage(role, content) {
 }
 
 function appendThinking() {
-  const container = document.getElementById('chat-messages');
+  const container = getSessionContainer(currentSessionId);
   const div = document.createElement('div');
   div.className = 'thinking-indicator';
-  div.innerHTML = '<div class="spinner"></div> 応答待ち';
+
+  const timerEl = document.createElement('span');
+  timerEl.className = 'thinking-timer';
+  timerEl.textContent = '0s';
+  div.innerHTML = '<div class="spinner"></div> 応答待ち ';
+  div.appendChild(timerEl);
+
+  const startTime = Date.now();
+  const intervalId = setInterval(() => {
+    if (!div.parentNode) { clearInterval(intervalId); return; }
+    timerEl.textContent = `${Math.floor((Date.now() - startTime) / 1000)}s`;
+  }, 1000);
+  // 削除時に自動でタイマーを止める
+  div._stopTimer = () => clearInterval(intervalId);
+
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
 }
 
 function appendToolUse(description) {
-  const container = document.getElementById('chat-messages');
+  const container = getSessionContainer(currentSessionId);
   const div = document.createElement('div');
   div.className = 'tool-use-notice';
   div.innerHTML = `<span class="icon">&#9881;</span> ${escapeHtml(description)}`;
   container.appendChild(div);
+}
+
+// ============================================================
+// セッション DOM キャッシュ
+// ============================================================
+
+function getSessionContainer(sessionId) {
+  const key = sessionId || 'new';
+  if (!sessionDomCache[key]) {
+    const el = document.createElement('div');
+    el.className = 'chat-messages';
+    el.style.display = 'none';
+    document.getElementById('chat-messages-host').appendChild(el);
+    sessionDomCache[key] = { el, stale: true };
+  }
+  return sessionDomCache[key].el;
+}
+
+function activateSessionContainer(sessionId) {
+  // 全コンテナを非表示にして、対象セッションのコンテナだけ表示
+  Object.values(sessionDomCache).forEach(c => { c.el.style.display = 'none'; });
+  const el = getSessionContainer(sessionId);
+  el.style.display = '';
+  return el;
 }
 
 // ============================================================
@@ -598,20 +787,17 @@ function switchTab(tabName) {
   tasksContent.style.display = 'none';
 
   // 右ペインを切り替え
-  chatPane.classList.add('hidden');
   settingsPane.classList.remove('visible');
-  taskDetailPane.classList.remove('visible');
 
   if (tabName === 'chat') {
     chatContent.style.display = '';
     chatPane.classList.remove('hidden');
   } else if (tabName === 'tasks') {
     tasksContent.style.display = 'flex';
-    if (currentTaskId) {
-      taskDetailPane.classList.add('visible');
-    }
+    // セッション表示中はチャットペインをそのまま維持
+    if (!currentSessionId) chatPane.classList.add('hidden');
   } else if (tabName === 'settings') {
-    settingsContent.classList.add('visible');
+    chatPane.classList.add('hidden');
     settingsPane.classList.add('visible');
     settingsPane.style.display = 'flex';
     loadSettingsData();
@@ -728,6 +914,7 @@ function initActions() {
   document.getElementById('new-chat-btn').addEventListener('click', () => {
     currentSessionId = null;
     clearChat();
+    activateSessionContainer(null); // 新規入力用の空コンテナを表示
     document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
   });
 
@@ -809,7 +996,7 @@ function showToast(message, duration = 4000) {
 }
 
 // ============================================================
-// タスク管理（モック実装）
+// タスク管理
 // ============================================================
 
 let currentTaskId = null;
@@ -817,111 +1004,30 @@ let showingDoneHistory = false;
 let taskContextMenuId = null;
 let pendingRejectTaskId = null;
 
-// モックデータ
-const MOCK_TASKS = {
-  task_001: {
-    id: 'task_001', title: 'CLAUDE.mdの編集UIの改善',
-    phase: 'doing', approval: 'approved', type: 'once',
-    created: '2026-04-01T15:00:00Z', agent: 'system',
-    background: 'CLAUDE.mdの編集時にシンタックスハイライトがなく、長文の編集が困難。',
-    policy: ['CodeMirrorを導入してMarkdownのシンタックスハイライトを実現する', 'プレビューペインを追加して編集中にリアルタイムプレビューを表示する'],
-    criteria: ['Markdown記法がハイライト表示される', 'リアルタイムプレビューが表示される'],
-    log: [{date: '2026/04/01 15:30', text: 'CodeMirror 6の導入を完了。基本的なMarkdownハイライトが動作している。'}, {date: '2026/04/01 16:00', text: 'プレビューペインを実装中。スタイル調整が残っている。'}],
-  },
-  task_002: {
-    id: 'task_002', title: 'セッション一覧の読み込み速度改善',
-    phase: 'draft', approval: 'approved', type: 'once',
-    created: '2026-04-01T17:00:00Z', agent: 'system',
-    background: 'セッション数が100を超えるとGET /api/agents/{id}/sessionsの応答が2秒以上かかる。JONLファイルを毎回全件パースしているのが原因。',
-    policy: ['JONLファイルのメタ情報をキャッシュファイルに保存する', '一覧取得時はキャッシュから返し、ファイル更新日時が変わったものだけ再パースする'],
-    criteria: ['セッション500件で一覧取得の応答が200ms以下', 'キャッシュ破損時にフルリビルドできる'],
-    log: [],
-  },
-  task_003: {
-    id: 'task_003', title: 'テストカバレッジの拡充',
-    phase: 'draft', approval: 'approved', type: 'once',
-    created: '2026-04-01T16:00:00Z', agent: 'system',
-    background: '主要コンポーネントのテストカバレッジが低い状態。',
-    policy: ['各コンポーネントのユニットテストを追加する', 'integration testを追加する'],
-    criteria: ['カバレッジ80%以上'],
-    log: [],
-  },
-  task_004: {
-    id: 'task_004', title: 'エージェント登録APIの追加',
-    phase: 'draft', approval: 'pending', type: 'once',
-    created: '2026-04-01T16:30:00Z', agent: 'system',
-    background: '現在エージェントはagents.jsonを直接編集して追加するしかない。Web UIから追加できるようにする。',
-    policy: ['POST /api/agents エンドポイントを追加する', 'UIにエージェント追加フォームを追加する'],
-    criteria: ['UIからエージェントを登録できる'],
-    log: [],
-  },
-  task_005: {
-    id: 'task_005', title: 'Codex対応の調査',
-    phase: 'draft', approval: 'pending', type: 'once',
-    created: '2026-04-01T18:00:00Z', agent: 'system',
-    background: 'Phase 1ではClaude Codeのみ対応。Codexへの対応が未実装。',
-    policy: ['Codex APIの仕様を調査する', 'CodexSessionReaderの設計案を作成する'],
-    criteria: ['調査レポートを作成する'],
-    log: [],
-  },
-  task_006: {
-    id: 'task_006', title: 'ConfigManagerの実装',
-    phase: 'done', approval: 'approved', type: 'once',
-    created: '2026-03-31T10:00:00Z', agent: 'system',
-    background: '', policy: [], criteria: [], log: [],
-  },
-  task_007: {
-    id: 'task_007', title: 'SessionReaderの実装',
-    phase: 'done', approval: 'approved', type: 'once',
-    created: '2026-03-30T16:00:00Z', agent: 'system',
-    background: '', policy: [], criteria: [], log: [],
-  },
-  task_008: {
-    id: 'task_008', title: 'プロジェクト初期構成',
-    phase: 'done', approval: 'approved', type: 'once',
-    created: '2026-03-29T11:00:00Z', agent: 'system',
-    background: '', policy: [], criteria: [], log: [],
-  },
-  task_sched_001: {
-    id: 'task_sched_001', title: '日次レポート生成',
-    phase: 'done', approval: 'approved', type: 'scheduled',
-    schedule: '毎日 09:00', schedActive: true, nextRun: '04/02 09:00',
-    created: '2026-04-01T09:00:00Z', agent: 'system',
-    background: '毎日の作業ログとセッション統計を集計してレポートを生成する。',
-    policy: ['セッション一覧から当日のデータを集計する', 'Markdownレポートとして保存する'],
-    criteria: ['毎日09:00に自動生成される'],
-    log: [{date: '2026/04/01 09:05', text: 'レポートを生成しました。本日のセッション数: 3件。'}],
-  },
-  task_sched_002: {
-    id: 'task_sched_002', title: '週次コードレビュー',
-    phase: 'draft', approval: 'approved', type: 'scheduled',
-    schedule: '毎週 月曜 10:00', schedActive: true, nextRun: null,
-    created: '2026-04-01T10:00:00Z', agent: 'system',
-    background: '週に一度、先週のコード変更を振り返りレビューする。',
-    policy: ['git logから直近1週間の変更を取得する', '変更内容を分析してレポートを作成する'],
-    criteria: ['レビューレポートが生成される'],
-    log: [],
-  },
-  task_sched_003: {
-    id: 'task_sched_003', title: '月次依存パッケージ更新確認',
-    phase: 'done', approval: 'approved', type: 'scheduled',
-    schedule: '毎月 1日 09:00', schedActive: false, nextRun: '05/01 09:00',
-    created: '2026-04-01T09:00:00Z', agent: 'system',
-    background: 'パッケージの脆弱性・更新情報を月次で確認する。',
-    policy: ['pip listでインストール済みパッケージを確認する', '更新が必要なものを報告する'],
-    criteria: ['更新確認レポートが生成される'],
-    log: [],
-  },
-};
+// キャッシュ
+let tasksCache = {};         // task_id → task
+let taskExecutionOrder = []; // 承認済みタスクの実行順序
 
-// 実行キューの順序（承認済みonce typeのタスクID順）
-let taskExecutionOrder = ['task_001', 'task_002', 'task_003'];
+async function loadTasks() {
+  if (!currentAgentId) return;
+  try {
+    const data = await fetch(`${API}/agents/${currentAgentId}/tasks`).then(r => r.json());
+    tasksCache = {};
+    data.tasks.forEach(t => { tasksCache[t.task_id] = t; });
+    taskExecutionOrder = data.order || [];
+    renderTaskList();
+    updatePendingBadge();
+    if (currentTaskId && tasksCache[currentTaskId]) {
+      renderTaskDetail(currentTaskId);
+    }
+  } catch (e) {
+    console.error('タスク読み込みエラー', e);
+  }
+}
 
 function initTasks() {
-  renderTaskList();
-  updatePendingBadge();
+  loadTasks();
 
-  // コンテキストメニューの外クリックで閉じる
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('task-context-menu');
     if (!menu.contains(e.target) && !e.target.classList.contains('task-more-btn')) {
@@ -929,46 +1035,59 @@ function initTasks() {
     }
   });
 
-  // コンテキストメニュー項目
+  document.getElementById('ctx-talk').addEventListener('click', async () => {
+    document.getElementById('task-context-menu').classList.remove('visible');
+    if (!taskContextMenuId) return;
+    await openTalkSession(taskContextMenuId);
+  });
+
+  document.getElementById('ctx-work').addEventListener('click', async () => {
+    document.getElementById('task-context-menu').classList.remove('visible');
+    if (!taskContextMenuId) return;
+    const task = tasksCache[taskContextMenuId];
+    await startWorkSession(taskContextMenuId, `タスク「${task.title}」について1ステップ作業してください。`);
+  });
+
   document.getElementById('ctx-edit').addEventListener('click', () => {
     document.getElementById('task-context-menu').classList.remove('visible');
     enterTaskEditMode();
   });
 
-  document.getElementById('ctx-force-done').addEventListener('click', () => {
+  document.getElementById('ctx-force-done').addEventListener('click', async () => {
     document.getElementById('task-context-menu').classList.remove('visible');
     if (!taskContextMenuId) return;
-    const task = MOCK_TASKS[taskContextMenuId];
-    if (task) { task.phase = 'done'; renderTaskList(); renderTaskDetail(taskContextMenuId); }
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${taskContextMenuId}/force-done`, { method: 'POST' });
+    await loadTasks();
   });
 
-  document.getElementById('ctx-delete').addEventListener('click', () => {
+  document.getElementById('ctx-delete').addEventListener('click', async () => {
     document.getElementById('task-context-menu').classList.remove('visible');
     if (!taskContextMenuId) return;
-    if (!confirm(`「${MOCK_TASKS[taskContextMenuId]?.title}」を削除しますか？`)) return;
-    delete MOCK_TASKS[taskContextMenuId];
-    taskExecutionOrder = taskExecutionOrder.filter(id => id !== taskContextMenuId);
-    currentTaskId = null;
-    renderTaskList();
-    updatePendingBadge();
-    document.getElementById('task-detail-pane').classList.remove('visible');
+    const task = tasksCache[taskContextMenuId];
+    if (!confirm(`「${task?.title}」を削除しますか？`)) return;
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${taskContextMenuId}`, { method: 'DELETE' });
+    if (currentTaskId === taskContextMenuId) backToTaskList();
+    await loadTasks();
   });
 
-  // 却下ダイアログ
   document.getElementById('reject-cancel').addEventListener('click', hideRejectDialog);
-  document.getElementById('reject-confirm').addEventListener('click', () => {
+  document.getElementById('reject-confirm').addEventListener('click', async () => {
     if (!pendingRejectTaskId) return;
-    const task = MOCK_TASKS[pendingRejectTaskId];
-    if (task) { task.approval = 'rejected'; }
+    const reason = document.getElementById('reject-reason').value;
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${pendingRejectTaskId}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    const tid = pendingRejectTaskId;
     hideRejectDialog();
-    renderTaskList();
-    renderTaskDetail(pendingRejectTaskId);
-    updatePendingBadge();
+    await loadTasks();
+    if (currentTaskId === tid) renderTaskDetail(tid);
   });
 }
 
 function updatePendingBadge() {
-  const count = Object.values(MOCK_TASKS).filter(t => t.approval === 'pending').length;
+  const count = Object.values(tasksCache).filter(t => t.approval === 'pending').length;
   const badge = document.getElementById('pending-badge');
   if (count > 0) {
     badge.textContent = count;
@@ -982,101 +1101,88 @@ function renderTaskList() {
   const list = document.getElementById('task-list');
   let html = '';
 
-  // 実行キュー（承認済みonce type、taskExecutionOrderに従う）
-  taskExecutionOrder.forEach((id, i) => {
-    const task = MOCK_TASKS[id];
-    if (!task || task.type !== 'once' || task.approval !== 'approved') return;
-    const isFirst = i === 0;
+  let queueIdx = 0;
+  taskExecutionOrder.forEach((id) => {
+    const task = tasksCache[id];
+    if (!task || task.approval !== 'approved') return;
+    queueIdx++;
     const active = id === currentTaskId ? ' active' : '';
-    const indicator = isFirst
+    const indicator = task.phase === 'doing'
       ? '<span class="doing-indicator"><span class="dot"></span>実行中</span>'
       : '';
     html += `
-      <div class="task-queue-row" data-row-id="${id}">
-        <span class="task-order-num">${i + 1}</span>
-        <div class="task-item draggable${active}" data-task-id="${id}" draggable="true">
-          <div class="task-item-header">
-            <span class="drag-handle">&#x2630;</span>
-            <div class="task-title-group">
-              <span class="task-item-title">${escapeHtml(task.title)}</span>
-              ${indicator}
-            </div>
-          </div>
-          <div class="task-item-meta">
-            <span>${formatTaskDate(task.created)}</span>
-          </div>
-        </div>
-      </div>`;
-  });
-
-  // 承認待ち
-  const pendingTasks = Object.values(MOCK_TASKS).filter(t => t.type === 'once' && t.approval === 'pending');
-  pendingTasks.forEach(task => {
-    const active = task.id === currentTaskId ? ' active' : '';
-    html += `
-      <div class="task-item task-item-indented${active}" data-task-id="${task.id}">
+      <div class="task-item draggable${active}" data-task-id="${id}" data-row-id="${id}" draggable="true">
         <div class="task-item-header">
+          <span class="drag-handle">&#x2630;</span>
           <div class="task-title-group">
             <span class="task-item-title">${escapeHtml(task.title)}</span>
-            <span class="badge badge-pending">承認待ち</span>
-          </div>
-        </div>
-        <div class="task-item-meta">
-          <span>${formatTaskDate(task.created)}</span>
-        </div>
-      </div>`;
-  });
-
-  // 却下済み（一応表示）
-  const rejectedTasks = Object.values(MOCK_TASKS).filter(t => t.type === 'once' && t.approval === 'rejected');
-  rejectedTasks.forEach(task => {
-    const active = task.id === currentTaskId ? ' active' : '';
-    html += `
-      <div class="task-item task-item-indented${active}" data-task-id="${task.id}" style="opacity:0.4;">
-        <div class="task-item-header">
-          <div class="task-title-group">
-            <span class="task-item-title">${escapeHtml(task.title)}</span>
-            <span class="badge" style="background:#f8514933;color:var(--danger);border:1px solid var(--danger);">却下</span>
+            ${indicator}
           </div>
         </div>
         <div class="task-item-meta"><span>${formatTaskDate(task.created)}</span></div>
       </div>`;
   });
 
-  // 完了タスク（最新1件 + 履歴）
-  const doneTasks = Object.values(MOCK_TASKS)
-    .filter(t => t.type === 'once' && t.phase === 'done' && t.approval === 'approved')
+  if (taskExecutionOrder.length > 0) {
+    html += `<div class="task-drop-end" id="task-drop-end"></div>`;
+  }
+
+  Object.values(tasksCache).filter(t => t.approval === 'pending').forEach(task => {
+    const active = task.task_id === currentTaskId ? ' active' : '';
+    html += `
+      <div class="task-item${active}" data-task-id="${task.task_id}">
+        <div class="task-item-header">
+          <div class="task-title-group">
+            <span class="task-item-title">${escapeHtml(task.title)}</span>
+          </div>
+        </div>
+        <div class="task-item-meta"><span class="badge badge-pending">承認待ち</span><span>${formatTaskDate(task.created)}</span></div>
+      </div>`;
+  });
+
+  Object.values(tasksCache).filter(t => t.approval === 'rejected').forEach(task => {
+    const active = task.task_id === currentTaskId ? ' active' : '';
+    html += `
+      <div class="task-item${active}" data-task-id="${task.task_id}" style="opacity:0.4;">
+        <div class="task-item-header">
+          <div class="task-title-group">
+            <span class="task-item-title">${escapeHtml(task.title)}</span>
+          </div>
+        </div>
+        <div class="task-item-meta"><span class="badge" style="background:#f8514933;color:var(--danger);border:1px solid var(--danger);">却下</span><span>${formatTaskDate(task.created)}</span></div>
+      </div>`;
+  });
+
+  const doneTasks = Object.values(tasksCache)
+    .filter(t => t.phase === 'done' && t.approval === 'approved')
     .sort((a, b) => b.created.localeCompare(a.created));
 
   if (doneTasks.length > 0) {
     const latest = doneTasks[0];
-    const active = latest.id === currentTaskId ? ' active' : '';
+    const active = latest.task_id === currentTaskId ? ' active' : '';
     html += `
-      <div class="task-item task-item-indented task-last-done${active}" data-task-id="${latest.id}">
+      <div class="task-item task-last-done${active}" data-task-id="${latest.task_id}">
         <div class="task-item-header">
           <div class="task-title-group">
             <span class="task-item-title">${escapeHtml(latest.title)}</span>
-            <span class="badge badge-done">done</span>
           </div>
         </div>
-        <div class="task-item-meta"><span>${formatTaskDate(latest.created)} 完了</span></div>
+        <div class="task-item-meta"><span class="badge badge-done">done</span><span>${formatTaskDate(latest.created)} 完了</span></div>
       </div>`;
 
     if (doneTasks.length > 1) {
       const histItems = doneTasks.slice(1).map(task => {
-        const a = task.id === currentTaskId ? ' active' : '';
+        const a = task.task_id === currentTaskId ? ' active' : '';
         return `
-          <div class="task-item task-item-indented${a}" data-task-id="${task.id}">
+          <div class="task-item${a}" data-task-id="${task.task_id}">
             <div class="task-item-header">
               <div class="task-title-group">
                 <span class="task-item-title">${escapeHtml(task.title)}</span>
-                <span class="badge badge-done">done</span>
               </div>
             </div>
-            <div class="task-item-meta"><span>${formatTaskDate(task.created)} 完了</span></div>
+            <div class="task-item-meta"><span class="badge badge-done">done</span><span>${formatTaskDate(task.created)} 完了</span></div>
           </div>`;
       }).join('');
-
       html += `
         <div class="task-done-history" id="task-done-history" style="${showingDoneHistory ? '' : 'display:none;'}">
           ${histItems}
@@ -1087,59 +1193,15 @@ function renderTaskList() {
     }
   }
 
-  // HR
-  html += '<hr class="task-list-divider">';
-
-  // スケジュールタスク
-  const scheduledTasks = Object.values(MOCK_TASKS).filter(t => t.type === 'scheduled');
-  scheduledTasks.forEach(task => {
-    const active = task.id === currentTaskId ? ' active' : '';
-    const isDone = task.phase === 'done';
-    const schedBadge = task.schedActive
-      ? `<span class="badge badge-sched-active" data-sched-id="${task.id}">定期実行</span>`
-      : `<span class="badge badge-sched-stopped" data-sched-id="${task.id}">停止中</span>`;
-    const nextRunHtml = task.nextRun
-      ? `&nbsp;›&nbsp;<span class="next-run">次回 ${task.nextRun}</span>`
-      : '';
-    html += `
-      <div class="task-item task-item-indented${isDone ? ' task-sched-done' : ''}${active}" data-task-id="${task.id}">
-        <div class="task-item-header">
-          <div class="task-title-group">
-            <span class="task-item-title">${escapeHtml(task.title)}</span>
-            ${isDone ? '<span class="badge badge-done">done</span>' : ''}
-            ${schedBadge}
-          </div>
-        </div>
-        <div class="task-item-meta">
-          <span class="task-schedule-info">${task.schedule}${nextRunHtml}</span>
-        </div>
-      </div>`;
-  });
-
   list.innerHTML = html;
 
-  // クリックイベント
   list.querySelectorAll('.task-item[data-task-id]').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.drag-handle') || e.target.closest('[data-sched-id]')) return;
+      if (e.target.closest('.drag-handle')) return;
       selectTask(el.dataset.taskId);
     });
   });
 
-  // スケジュールトグル
-  list.querySelectorAll('[data-sched-id]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = el.dataset.schedId;
-      const task = MOCK_TASKS[id];
-      if (!task) return;
-      task.schedActive = !task.schedActive;
-      renderTaskList();
-      if (currentTaskId === id) renderTaskDetail(id);
-    });
-  });
-
-  // 完了履歴トグル
   const toggleEl = document.getElementById('task-done-toggle');
   if (toggleEl) {
     toggleEl.addEventListener('click', () => {
@@ -1148,27 +1210,29 @@ function renderTaskList() {
     });
   }
 
-  // ドラッグ&ドロップ（実行キュー）
   initTaskDragDrop();
 }
 
 function selectTask(taskId) {
   currentTaskId = taskId;
   renderTaskList();
-
-  // 右ペインをタスク詳細に切り替え
-  document.getElementById('chat-pane').classList.add('hidden');
-  document.getElementById('settings-pane').classList.remove('visible');
-  document.getElementById('task-detail-pane').classList.add('visible');
-
+  document.getElementById('task-list-view').style.display = 'none';
+  const detailPane = document.getElementById('task-detail-pane');
+  detailPane.style.display = 'flex';
   renderTaskDetail(taskId);
 }
 
+function backToTaskList() {
+  currentTaskId = null;
+  document.getElementById('task-list-view').style.display = '';
+  document.getElementById('task-detail-pane').style.display = 'none';
+  renderTaskList();
+}
+
 function renderTaskDetail(taskId) {
-  const task = MOCK_TASKS[taskId];
+  const task = tasksCache[taskId];
   if (!task) return;
 
-  // ヘッダー
   const headerEl = document.getElementById('task-detail-header');
   let approvalHtml = '';
   if (task.approval === 'pending') {
@@ -1176,39 +1240,34 @@ function renderTaskDetail(taskId) {
       <button class="approval-btn approve" data-approve="${taskId}">承認</button>
       <button class="approval-btn reject" data-reject="${taskId}">却下</button>`;
   } else if (task.approval === 'approved') {
-    approvalHtml = `<div class="approval-status-badge approved">✓ 承認済み</div>`;
+    const dt = task.approved_at
+      ? new Date(task.approved_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '';
+    approvalHtml = `<div class="approval-status-badge approved">✓ 承認済み${dt ? ' (' + dt + ')' : ''}</div>`;
   } else if (task.approval === 'rejected') {
-    approvalHtml = `<div class="approval-status-badge rejected">✗ 却下</div>`;
+    const dt = task.rejected_at
+      ? new Date(task.rejected_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '';
+    approvalHtml = `<div class="approval-status-badge rejected">✗ 却下${dt ? ' (' + dt + ')' : ''}</div>`;
   }
 
-  const phaseBadgeMap = { draft: '', doing: '<span class="doing-indicator"><span class="dot"></span>実行中</span>', done: '<span class="badge badge-done">done</span>' };
-  const phaseBadge = phaseBadgeMap[task.phase] || '';
+  const phaseLabel = { draft: '未着手', doing: '実行中', done: '完了' }[task.phase] ?? task.phase;
+  const phaseBadge = task.phase === 'doing'
+    ? '<span class="doing-indicator"><span class="dot"></span>実行中</span>'
+    : task.phase === 'done'
+    ? '<span class="badge badge-done">完了</span>'
+    : '';
 
   headerEl.innerHTML = `
     <div class="task-detail-header-left">
-      ${phaseBadge}
-      <span class="task-detail-title">${escapeHtml(task.title)}</span>
+      <button class="task-back-btn" id="task-detail-back">←</button>
     </div>
     <div class="task-detail-actions">
-      ${approvalHtml}
       <button class="task-more-btn" data-more="${taskId}" title="その他">&#x22EF;</button>
     </div>`;
 
-  // 承認/却下ボタンのイベント
-  headerEl.querySelector(`[data-approve="${taskId}"]`)?.addEventListener('click', () => {
-    task.approval = 'approved';
-    taskExecutionOrder.push(taskId);
-    renderTaskList();
-    renderTaskDetail(taskId);
-    updatePendingBadge();
-  });
+  headerEl.querySelector('#task-detail-back').addEventListener('click', backToTaskList);
 
-  headerEl.querySelector(`[data-reject="${taskId}"]`)?.addEventListener('click', () => {
-    pendingRejectTaskId = taskId;
-    showRejectDialog();
-  });
-
-  // ... メニューボタン
   headerEl.querySelector(`[data-more="${taskId}"]`)?.addEventListener('click', (e) => {
     e.stopPropagation();
     taskContextMenuId = taskId;
@@ -1218,87 +1277,97 @@ function renderTaskDetail(taskId) {
     menu.style.right = (window.innerWidth - rect.right) + 'px';
     menu.style.left = '';
     menu.classList.toggle('visible');
-    // 完了済みなら強制完了を無効化
     document.getElementById('ctx-force-done').style.opacity = task.phase === 'done' ? '0.4' : '';
     document.getElementById('ctx-force-done').style.pointerEvents = task.phase === 'done' ? 'none' : '';
   });
 
-  // ボディ
   const bodyEl = document.getElementById('task-detail-body');
-  const created = new Date(task.created).toLocaleString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+  const created = new Date(task.created).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const bodyHtml = task.body ? marked.parse(task.body) : '';
 
-  let contentHtml = '';
-  if (task.background) {
-    contentHtml += `<h2>背景</h2><p>${escapeHtml(task.background)}</p>`;
+  const totalSteps = (task.body.match(/- \[[ x]\]/g) || []).length;
+  const doneSteps = (task.body.match(/- \[x\]/g) || []).length;
+  const progress = totalSteps > 0 ? Math.round(doneSteps / totalSteps * 100) : null;
+  let segmentStyle = '';
+  if (totalSteps > 1) {
+    const stops = Array.from({ length: totalSteps - 1 }, (_, i) => {
+      const pct = Math.round((i + 1) / totalSteps * 100);
+      return `transparent ${pct}%, var(--bg-primary) ${pct}%, var(--bg-primary) calc(${pct}% + 3px), transparent calc(${pct}% + 3px)`;
+    }).join(', ');
+    segmentStyle = `style="background-image: linear-gradient(to right, ${stops})"`;
   }
-  if (task.policy && task.policy.length > 0) {
-    contentHtml += `<h2>方針</h2><ol>${task.policy.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ol>`;
-  }
-  if (task.criteria && task.criteria.length > 0) {
-    contentHtml += `<h2>完了条件</h2><ul>${task.criteria.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>`;
-  }
-  if (task.log && task.log.length > 0) {
-    contentHtml += `<h2>作業ログ</h2>${task.log.map(l => `<div class="log-entry"><div class="log-date">${escapeHtml(l.date)}</div>${escapeHtml(l.text)}</div>`).join('')}`;
-  }
+  const progressBar = progress !== null ? `
+    <div class="task-progress-bar">
+      <div class="task-progress-fill" style="width:${progress}%"></div>
+      <div class="task-progress-segments" ${segmentStyle}></div>
+    </div>
+    <div class="task-progress-label">${doneSteps} / ${totalSteps}</div>` : '';
 
   bodyEl.innerHTML = `
+    ${progressBar}
+    <div class="task-detail-title-full">${escapeHtml(task.title)}</div>
+    <div class="task-md-content">${bodyHtml}</div>
     <div class="task-meta-bar">
-      <div class="task-meta-item"><span class="task-meta-label">ID:</span><span>${escapeHtml(task.id)}</span></div>
-      <div class="task-meta-item"><span class="task-meta-label">担当:</span><span>${escapeHtml(task.agent)}</span></div>
+      <div class="task-meta-item"><span class="task-meta-label">フェーズ:</span>${phaseBadge || `<span>${phaseLabel}</span>`}</div>
+      <div class="task-meta-item">${approvalHtml || ''}</div>
       <div class="task-meta-item"><span class="task-meta-label">起票:</span><span>${created}</span></div>
-      ${task.type === 'scheduled' ? `<div class="task-meta-item"><span class="task-meta-label">スケジュール:</span><span>${escapeHtml(task.schedule)}</span></div>` : ''}
-    </div>
-    <div class="task-md-content">${contentHtml}</div>`;
+      ${task.schedule ? `<div class="task-meta-item"><span class="task-meta-label">スケジュール:</span><span>${escapeHtml(task.schedule)}</span></div>` : ''}
+      ${task.talk_session_id ? (() => {
+        const s = sessions.find(s => s.session_id === task.talk_session_id);
+        return s ? `<div class="task-meta-item"><span class="task-meta-label">相談セッション:</span><a class="task-session-link" data-session-id="${task.talk_session_id}">${escapeHtml(s.title || s.session_id)}</a></div>` : '';
+      })() : ''}
+    </div>`;
+
+  bodyEl.querySelector('.task-session-link')?.addEventListener('click', async (e) => {
+    const sid = e.currentTarget.dataset.sessionId;
+    document.getElementById('chat-pane').classList.remove('hidden');
+    await selectSession(sid);
+  });
+
+  bodyEl.querySelector(`[data-approve="${taskId}"]`)?.addEventListener('click', async () => {
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/approve`, { method: 'POST' });
+    await loadTasks();
+  });
+
+  bodyEl.querySelector(`[data-reject="${taskId}"]`)?.addEventListener('click', () => {
+    pendingRejectTaskId = taskId;
+    showRejectDialog();
+  });
 }
 
 function enterTaskEditMode() {
-  const task = MOCK_TASKS[currentTaskId];
+  const task = tasksCache[currentTaskId];
   if (!task) return;
 
-  // 本文を textarea に変換
   const bodyEl = document.getElementById('task-detail-body');
-  const content = [
-    task.background ? `## 背景\n${task.background}` : '',
-    task.policy?.length ? `## 方針\n${task.policy.map((p, i) => `${i+1}. ${p}`).join('\n')}` : '',
-    task.criteria?.length ? `## 完了条件\n${task.criteria.map(c => `- ${c}`).join('\n')}` : '',
-  ].filter(Boolean).join('\n\n');
-
-  // meta-bar は維持しつつ md-content を textarea に置き換え
   const mdContent = bodyEl.querySelector('.task-md-content');
-  if (mdContent) {
-    mdContent.innerHTML = `
-      <textarea class="task-edit-textarea" id="task-edit-textarea">${escapeHtml(content)}</textarea>
-      <div class="task-edit-actions">
-        <button class="chat-action-btn" id="task-edit-cancel">キャンセル</button>
-        <button class="settings-save-btn" id="task-edit-save">保存</button>
-      </div>`;
+  if (!mdContent) return;
 
-    document.getElementById('task-edit-cancel').addEventListener('click', () => {
-      renderTaskDetail(currentTaskId);
+  mdContent.innerHTML = `
+    <textarea class="task-edit-textarea" id="task-edit-textarea">${escapeHtml(task.body || '')}</textarea>
+    <div class="task-edit-actions">
+      <button class="chat-action-btn" id="task-edit-cancel">キャンセル</button>
+      <button class="settings-save-btn" id="task-edit-save">保存</button>
+    </div>`;
+
+  document.getElementById('task-edit-cancel').addEventListener('click', () => {
+    renderTaskDetail(currentTaskId);
+  });
+
+  document.getElementById('task-edit-save').addEventListener('click', async () => {
+    const body = document.getElementById('task-edit-textarea').value;
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${currentTaskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
     });
-
-    document.getElementById('task-edit-save').addEventListener('click', () => {
-      // 簡易パース: 背景/方針/完了条件を抽出して保存
-      const text = document.getElementById('task-edit-textarea').value;
-      task.background = extractSection(text, '背景') || task.background;
-      const policyText = extractSection(text, '方針');
-      if (policyText) task.policy = policyText.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
-      const criteriaText = extractSection(text, '完了条件');
-      if (criteriaText) task.criteria = criteriaText.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
-      renderTaskDetail(currentTaskId);
-    });
-  }
-}
-
-function extractSection(text, heading) {
-  const re = new RegExp(`##\\s+${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`);
-  const m = text.match(re);
-  return m ? m[1].trim() : null;
+    await loadTasks();
+  });
 }
 
 function formatTaskDate(iso) {
   const d = new Date(iso);
-  return d.toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).replace(/\//g, '/');
+  return d.toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function showRejectDialog() {
@@ -1314,43 +1383,72 @@ function hideRejectDialog() {
 function initTaskDragDrop() {
   let dragRowId = null;
 
-  document.querySelectorAll('.task-queue-row').forEach(row => {
-    const item = row.querySelector('.task-item.draggable');
-    if (!item) return;
-
+  document.querySelectorAll('.task-item.draggable').forEach(item => {
     item.addEventListener('dragstart', (e) => {
-      dragRowId = row.dataset.rowId;
-      row.classList.add('dragging');
+      dragRowId = item.dataset.rowId;
+      item.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
     });
 
     item.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      document.querySelectorAll('.task-queue-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+      item.classList.remove('dragging');
+      document.querySelectorAll('.task-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+      document.getElementById('task-drop-end')?.classList.remove('drag-over');
       dragRowId = null;
     });
 
-    row.addEventListener('dragover', (e) => {
+    item.addEventListener('dragover', (e) => {
       e.preventDefault();
-      if (row.dataset.rowId === dragRowId) return;
+      if (item.dataset.rowId === dragRowId) return;
       e.dataTransfer.dropEffect = 'move';
-      row.classList.add('drag-over');
+      item.classList.add('drag-over');
     });
 
-    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
 
-    row.addEventListener('drop', (e) => {
+    item.addEventListener('drop', async (e) => {
       e.preventDefault();
-      row.classList.remove('drag-over');
-      if (!dragRowId || row.dataset.rowId === dragRowId) return;
+      item.classList.remove('drag-over');
+      if (!dragRowId || item.dataset.rowId === dragRowId) return;
       const fromIdx = taskExecutionOrder.indexOf(dragRowId);
-      const toIdx = taskExecutionOrder.indexOf(row.dataset.rowId);
+      const toIdx = taskExecutionOrder.indexOf(item.dataset.rowId);
       if (fromIdx < 0 || toIdx < 0) return;
       taskExecutionOrder.splice(fromIdx, 1);
       taskExecutionOrder.splice(toIdx, 0, dragRowId);
       renderTaskList();
+      await fetch(`${API}/agents/${currentAgentId}/tasks/order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: taskExecutionOrder }),
+      });
     });
   });
+
+  const endZone = document.getElementById('task-drop-end');
+  if (endZone) {
+    endZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!dragRowId) return;
+      e.dataTransfer.dropEffect = 'move';
+      endZone.classList.add('drag-over');
+    });
+    endZone.addEventListener('dragleave', () => endZone.classList.remove('drag-over'));
+    endZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      endZone.classList.remove('drag-over');
+      if (!dragRowId) return;
+      const fromIdx = taskExecutionOrder.indexOf(dragRowId);
+      if (fromIdx < 0 || fromIdx === taskExecutionOrder.length - 1) return;
+      taskExecutionOrder.splice(fromIdx, 1);
+      taskExecutionOrder.push(dragRowId);
+      renderTaskList();
+      await fetch(`${API}/agents/${currentAgentId}/tasks/order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: taskExecutionOrder }),
+      });
+    });
+  }
 }
 
 function escapeHtml(text) {

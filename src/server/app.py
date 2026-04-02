@@ -14,6 +14,7 @@ from server.session_reader import SessionReader, ClaudeSessionReader
 from server.cli_bridge import CLIBridge
 from server.routes.agents import router as agents_router
 from server.routes.chat import router as chat_router
+from server.routes.tasks import router as tasks_router
 
 
 def resolve_project_root() -> Path:
@@ -54,6 +55,7 @@ def create_app(
 
     app.include_router(agents_router)
     app.include_router(chat_router)
+    app.include_router(tasks_router)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

@@ -39,7 +39,7 @@ body {
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden;
 }
-.sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 600; color: var(--accent); letter-spacing: 0.5px; }
+.sidebar-header { height: 48px; box-sizing: border-box; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 600; color: var(--accent); letter-spacing: 0.5px; }
 .sidebar-section-label { padding: 12px 16px 6px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
 .agent-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
 .agent-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; cursor: pointer; transition: background 0.15s; border: 1px solid transparent; }
@@ -52,8 +52,8 @@ body {
 
 /* 中央ペイン */
 .middle-pane { width: 320px; flex-shrink: 0; background: var(--bg-primary); display: flex; flex-direction: column; overflow: hidden; }
-.tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
-.tab { flex: 1; padding: 12px 0; text-align: center; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.tabs { height: 48px; box-sizing: border-box; display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.tab { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0; text-align: center; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
 .tab:hover { color: var(--text-primary); background: var(--bg-hover); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
@@ -97,7 +97,7 @@ body {
 /* 右ペイン: チャット */
 .chat-pane { flex: 1; min-width: 300px; display: flex; flex-direction: column; overflow: hidden; }
 .chat-pane.hidden { display: none; }
-.chat-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.chat-header { height: 48px; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
 .chat-title-group { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .chat-title { font-size: 14px; font-weight: 500; color: var(--text-secondary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-title:hover { color: var(--accent); }
@@ -108,7 +108,8 @@ body {
 .chat-action-btn.cli:hover { background: #3fb95018; }
 .chat-action-btn.hide:hover { border-color: var(--text-secondary); color: var(--text-primary); }
 
-.chat-messages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+#chat-messages-host { flex: 1; overflow: hidden; position: relative; }
+.chat-messages { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .message { display: flex; flex-direction: column; max-width: 75%; }
 .message.user { align-self: flex-end; align-items: flex-end; }
 .message.assistant { align-self: flex-start; align-items: flex-start; }
@@ -140,6 +141,7 @@ body {
 
 .thinking-indicator { align-self: flex-start; display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--assistant-bg); border-radius: 12px; border-bottom-left-radius: 4px; font-size: 13px; color: var(--text-secondary); }
 .thinking-indicator .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.thinking-timer { font-size: 11px; color: var(--text-muted); min-width: 2.5em; }
 
 /* 入力エリア */
 .chat-input-area { padding: 12px 20px 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-secondary); }
@@ -174,6 +176,10 @@ body {
 .mobile-back-btn { display: none; padding: 5px 12px; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 .mobile-back-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
 
+/* タスク詳細の戻るボタン（常に表示） */
+.task-back-btn { display: block; padding: 5px 12px; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.task-back-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+
 /* サイドバートグルボタン（デスクトップでは非表示） */
 .sidebar-toggle { display: none; padding: 6px 10px; background: transparent; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; flex-shrink: 0; line-height: 1; }
 .sidebar-toggle:hover { color: var(--text-primary); }
@@ -193,7 +199,7 @@ body {
   .mobile-back-btn { display: block; }
   .sidebar { z-index: 30; }
   .tabs { padding-top: env(safe-area-inset-top); }
-  .chat-header { padding: calc(8px + env(safe-area-inset-top)) 10px 8px; flex-wrap: nowrap; gap: 6px; }
+  .chat-header { height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 10px 0; flex-wrap: nowrap; gap: 6px; }
   .chat-title-group { flex: 1; min-width: 0; gap: 6px; }
   .chat-title { font-size: 12px; }
   .header-model-select { font-size: 11px; padding: 2px 4px; }
@@ -237,25 +243,6 @@ body {
 /* タスクリスト */
 .task-list { padding: 8px 4px; }
 
-.task-queue-row {
-  display: flex;
-  align-items: stretch;
-  margin-bottom: 2px;
-}
-
-.task-order-num {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  flex-shrink: 0;
-  color: var(--text-secondary);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.task-queue-row .task-item { flex: 1; margin-bottom: 0; }
-
 .task-item {
   padding: 10px 12px;
   border-radius: 6px;
@@ -268,7 +255,6 @@ body {
 .task-item:hover { background: var(--bg-hover); }
 .task-item.active { background: var(--bg-active); border-color: var(--accent); }
 
-.task-item-indented { margin-left: 32px; }
 
 .task-item-header {
   display: flex;
@@ -298,9 +284,11 @@ body {
 .task-item-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-size: 11px;
   color: var(--text-muted);
+  min-width: 0;
 }
 
 /* バッジ共通 */
@@ -315,7 +303,7 @@ body {
   flex-shrink: 0;
 }
 
-.badge-done { background: #3fb95033; color: var(--success); border: 1px solid var(--success); }
+.badge-done { background: #484f5833; color: var(--text-secondary); border: 1px solid var(--text-muted); }
 .badge-pending { background: #d2992233; color: var(--warning); border: 1px solid var(--warning); }
 
 /* ドラッグハンドル */
@@ -335,8 +323,10 @@ body {
 .drag-handle:hover { color: var(--accent); opacity: 1; }
 .drag-handle:active { cursor: grabbing; }
 
-.task-queue-row.dragging { opacity: 0.4; }
-.task-queue-row.drag-over { border-top: 2px solid var(--accent); }
+.task-item.dragging { opacity: 0.4; }
+.task-item.drag-over { border-top: 2px solid var(--accent); }
+.task-drop-end { height: 32px; }
+.task-drop-end.drag-over { border-top: 2px solid var(--accent); }
 
 /* 実行中インジケーター */
 .doing-indicator {
@@ -377,50 +367,23 @@ body {
 
 .task-done-toggle:hover { color: var(--accent); }
 
-/* セパレーター */
-.task-list-divider { margin: 12px 8px 8px; border: none; border-top: 1px solid var(--border); }
-
-/* スケジュール情報 */
-.task-schedule-info { font-size: 11px; color: var(--text-muted); }
-.task-schedule-info .next-run { color: var(--accent); }
-
-/* スケジュールタスク done 状態 */
-.task-item.task-sched-done { opacity: 0.4; }
-
-/* スケジュールトグルバッジ */
-.badge-sched-active {
-  background: #1f6feb33; color: var(--accent); border: 1px solid var(--accent);
-  cursor: pointer; transition: all 0.15s;
-}
-
-.badge-sched-active:hover { background: #f8514918; color: var(--danger); border-color: var(--danger); }
-
-.badge-sched-stopped {
-  background: #f8514918; color: var(--danger); border: 1px solid var(--danger);
-  cursor: pointer; transition: all 0.15s;
-}
-
-.badge-sched-stopped:hover { background: #1f6feb33; color: var(--accent); border-color: var(--accent); }
-
 /* ============================================================
-   タスク詳細ペイン（右ペイン）
+   タスク詳細ペイン（中央ペイン内）
    ============================================================ */
 
 .task-detail-pane {
   display: none;
   flex-direction: column;
-  flex: 1;
-  min-width: 300px;
   overflow: hidden;
 }
 
-.task-detail-pane.visible { display: flex; }
-
 .task-detail-header {
+  height: 48px;
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
   gap: 12px;
@@ -464,13 +427,13 @@ body {
 
 /* 承認済み/却下表示 */
 .approval-status-badge {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 600;
-  padding: 5px 12px; border-radius: 6px;
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 10px;
+  white-space: nowrap;
 }
 
-.approval-status-badge.approved { color: var(--success); background: #3fb95018; border: 1px solid #3fb95044; }
-.approval-status-badge.rejected { color: var(--danger); background: #f8514918; border: 1px solid #f8514944; }
+.approval-status-badge.approved { color: var(--success); border: 1px solid #3fb95044; }
+.approval-status-badge.rejected { color: var(--danger); border: 1px solid #f8514944; }
 
 /* ... メニューボタン */
 .task-more-btn {
@@ -521,10 +484,78 @@ body {
 /* タスク詳細ボディ */
 .task-detail-body { flex: 1; overflow-y: auto; padding: 24px; }
 
+.task-progress-bar {
+  position: relative;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.task-progress-segments {
+  position: absolute;
+  inset: 0;
+}
+
+.task-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.task-progress-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.task-detail-title-full {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 16px;
+}
+
+.task-detail-body input[type="checkbox"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--text-secondary);
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: 6px;
+  flex-shrink: 0;
+  cursor: default;
+  position: relative;
+}
+
+.task-detail-body input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.task-detail-body input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
 .task-meta-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
   padding-bottom: 16px;
   margin-bottom: 20px;
   border-bottom: 1px solid var(--border);
@@ -534,6 +565,8 @@ body {
 
 .task-meta-item { display: flex; align-items: center; gap: 4px; }
 .task-meta-label { color: var(--text-muted); }
+.task-session-link { color: var(--accent); cursor: pointer; text-decoration: none; }
+.task-session-link:hover { text-decoration: underline; }
 
 /* タスクMDコンテンツ */
 .task-md-content { font-size: 14px; line-height: 1.7; color: var(--text-primary); }

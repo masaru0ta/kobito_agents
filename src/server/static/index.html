@@ -21,7 +21,7 @@
   <div class="middle-pane" id="middle-pane">
     <div class="tabs">
       <button class="sidebar-toggle" id="sidebar-toggle" title="エージェント一覧">☰</button>
-      <div class="tab active" data-tab="chat">会話</div>
+      <div class="tab active" data-tab="chat">セッション</div>
       <div class="tab" data-tab="tasks">タスク<span class="tab-badge" id="pending-badge" style="display:none;"></span></div>
       <div class="tab" data-tab="settings">設定</div>
     </div>
@@ -33,8 +33,14 @@
     </div>
 
     <!-- タスクタブ -->
-    <div id="tasks-tab-content" style="display:none; flex:1; overflow-y:auto;">
-      <div class="task-list" id="task-list"></div>
+    <div id="tasks-tab-content" style="display:none; flex:1; overflow:hidden; position:relative;">
+      <div id="task-list-view" style="position:absolute; inset:0; overflow-y:auto; overflow-x:hidden;">
+        <div class="task-list" id="task-list"></div>
+      </div>
+      <div id="task-detail-pane" class="task-detail-pane" style="position:absolute; inset:0; display:none; flex-direction:column;">
+        <div class="task-detail-header" id="task-detail-header"></div>
+        <div class="task-detail-body" id="task-detail-body"></div>
+      </div>
     </div>
 
     <!-- 設定タブ -->
@@ -80,7 +86,7 @@
         <button class="chat-action-btn hide" id="btn-hide">非表示</button>
       </div>
     </div>
-    <div class="chat-messages" id="chat-messages"></div>
+    <div id="chat-messages-host"></div>
     <div class="chat-input-area">
       <div class="chat-input-wrapper">
         <textarea class="chat-input" id="chat-input" placeholder="メッセージを入力..." rows="1"></textarea>
@@ -90,12 +96,6 @@
         <span class="input-hint">Enter で送信 / Shift+Enter で改行</span>
       </div>
     </div>
-  </div>
-
-  <!-- 右ペイン: タスク詳細 -->
-  <div class="task-detail-pane" id="task-detail-pane">
-    <div class="task-detail-header" id="task-detail-header"></div>
-    <div class="task-detail-body" id="task-detail-body"></div>
   </div>
 
   <!-- 右ペイン: 設定画面 -->
@@ -120,6 +120,9 @@
 
 <!-- タスク: コンテキストメニュー -->
 <div id="task-context-menu" class="context-menu">
+  <div class="context-menu-item" id="ctx-talk">タスクについて話す</div>
+  <div class="context-menu-item" id="ctx-work">1ステップ作業する</div>
+  <div class="context-menu-divider"></div>
   <div class="context-menu-item" id="ctx-edit">編集</div>
   <div class="context-menu-item" id="ctx-force-done">強制完了</div>
   <div class="context-menu-divider"></div>
@@ -139,6 +142,6 @@
 </div>
 
 <script src="/marked.min.js"></script>
-<script src="/app.js"></script>
+<script src="/app.js?v=2"></script>
 </body>
 </html>
