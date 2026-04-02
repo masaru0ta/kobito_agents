@@ -22,6 +22,8 @@ class SessionSummary(BaseModel):
     updated_at: str
     message_count: int
     last_message: str
+    title: str = ""
+    model_tier: str = ""
 
 
 class SessionReader(ABC):
@@ -50,6 +52,23 @@ class ClaudeSessionReader(SessionReader):
 
     def _sessions_dir(self, project_path: str) -> Path:
         return self._claude_home / "projects" / self.get_project_hash(project_path)
+
+    def get_dir_mtime(self, project_path: str) -> float:
+        """セッションディレクトリ内のJSONLファイル群の最大更新時刻を返す"""
+        d = self._sessions_dir(project_path)
+        if not d.exists():
+            return 0
+        max_mtime = 0
+        for p in d.glob("*.jsonl"):
+            mt = p.stat().st_mtime
+            if mt > max_mtime:
+                max_mtime = mt
+        return max_mtime
+
+    def get_session_mtime(self, project_path: str, session_id: str) -> float:
+        """指定セッションJSONLの更新時刻を返す（存在しなければ0）"""
+        p = self._sessions_dir(project_path) / f"{session_id}.jsonl"
+        return p.stat().st_mtime if p.exists() else 0
 
     def _load_meta(self, project_path: str, session_id: str) -> dict:
         """`.kobito/meta/{session_id}.json` を読む。存在しなければ空dictを返す"""
@@ -93,6 +112,13 @@ class ClaudeSessionReader(SessionReader):
                         elif isinstance(item, str):
                             parts.append(item)
                     content = "\n".join(parts) if parts else ""
+                # コンパクションサマリーをスキップ（isCompactSummaryフラグ or 文字列マッチング）
+                if event.get("isCompactSummary"):
+                    continue
+                if isinstance(content, str) and content.lstrip().startswith(
+                    "This session is being continued from a previous conversation"
+                ):
+                    continue
                 messages.append(SessionMessage(
                     role="user",
                     content=content,
@@ -141,6 +167,8 @@ class ClaudeSessionReader(SessionReader):
                 updated_at=messages[-1].timestamp,
                 message_count=len(messages),
                 last_message=messages[-1].content[:100],
+                title=meta.get("title", ""),
+                model_tier=meta.get("model_tier", ""),
             ))
 
         summaries.sort(key=lambda s: s.updated_at, reverse=True)

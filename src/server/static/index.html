@@ -63,9 +63,11 @@
   <!-- 右ペイン: チャット画面 -->
   <div class="chat-pane" id="chat-pane">
     <div class="chat-header">
-      <span class="chat-title" id="chat-title"></span>
+      <div class="chat-title-group">
+        <span class="chat-title" id="chat-title" title="クリックして編集"></span>
+        <select class="model-select header-model-select" id="model-select"></select>
+      </div>
       <div class="chat-actions">
-        <button class="chat-action-btn" id="btn-summarize">要約する</button>
         <button class="chat-action-btn cli" id="btn-cli">CLI起動</button>
         <button class="chat-action-btn hide" id="btn-hide">非表示</button>
       </div>
@@ -76,7 +78,9 @@
         <textarea class="chat-input" id="chat-input" placeholder="メッセージを入力..." rows="1"></textarea>
         <button class="send-btn" id="send-btn">送信</button>
       </div>
-      <div class="input-hint">Enter で送信 / Shift+Enter で改行</div>
+      <div class="input-footer">
+        <span class="input-hint">Enter で送信 / Shift+Enter で改行</span>
+      </div>
     </div>
   </div>
 

@@ -277,6 +277,16 @@
     text-align: right;
   }
 
+  .conv-title {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+  }
+
   .conv-preview {
     font-size: 13px;
     color: var(--text-primary);
@@ -393,6 +403,11 @@
     font-size: 14px;
     font-weight: 500;
     color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .chat-title:hover {
+    color: var(--accent);
   }
 
   .chat-actions {
@@ -753,6 +768,7 @@
             <span class="conv-date">2026/04/01 15:30</span>
             <span class="conv-count">(4)</span>
           </div>
+          <div class="conv-title">Phase 1 仕様レビュー</div>
           <div class="conv-preview">Phase 1の仕様書を確認してください</div>
         </div>
         <div class="conversation-item">
@@ -760,6 +776,7 @@
             <span class="conv-date">2026/04/01 14:20</span>
             <span class="conv-count">(8)</span>
           </div>
+          <div class="conv-title">旧プロジェクト調査</div>
           <div class="conv-preview">旧プロジェクトの構成を把握して...</div>
           <div class="conv-status">
             <div class="spinner"></div>
@@ -811,9 +828,8 @@
        ============================ -->
   <div class="chat-pane" id="chat-pane">
     <div class="chat-header">
-      <span class="chat-title">2026/04/01 15:30 の会話</span>
+      <span class="chat-title" title="クリックして編集">Phase 1 仕様レビュー</span>
       <div class="chat-actions">
-        <button class="chat-action-btn">要約する</button>
         <button class="chat-action-btn cli">CLI起動</button>
         <button class="chat-action-btn hide">非表示</button>
       </div>

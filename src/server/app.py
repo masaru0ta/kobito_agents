@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -36,7 +37,12 @@ def create_app(
     if cli_bridge is None:
         cli_bridge = CLIBridge()
 
-    app = FastAPI(title="kobito_agents")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await cli_bridge.shutdown()
+
+    app = FastAPI(title="kobito_agents", lifespan=lifespan)
 
     app.state.config_manager = config_manager
     app.state.session_reader = session_reader

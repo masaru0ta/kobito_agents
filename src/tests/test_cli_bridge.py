@@ -9,28 +9,21 @@ import pytest
 class TestBuildCommand:
     """コマンド構築"""
 
-    def test_cwdがプロジェクトパスに設定される(self):
+    def test_stream_json入力モードが指定される(self):
         from server.cli_bridge import CLIBridge
 
         bridge = CLIBridge()
-        cmd, cwd = bridge.build_command(
-            project_path="/tmp/test_project",
-            model="opus",
-            session_id=None,
-            system_prompt="テスト",
-        )
+        cmd = bridge._build_command(model="opus")
 
-        assert cwd == "/tmp/test_project"
+        assert "--input-format" in cmd
+        assert "stream-json" in cmd
+        assert "--output-format" in cmd
 
     def test_session_id指定時にresumeが付く(self):
         from server.cli_bridge import CLIBridge
 
         bridge = CLIBridge()
-        cmd, cwd = bridge.build_command(
-            project_path="/tmp/test_project",
-            model="opus",
-            session_id="sess-001",
-        )
+        cmd = bridge._build_command(model="opus", session_id="sess-001")
 
         assert "--resume" in cmd
         assert "sess-001" in cmd
@@ -39,12 +32,7 @@ class TestBuildCommand:
         from server.cli_bridge import CLIBridge
 
         bridge = CLIBridge()
-        cmd, cwd = bridge.build_command(
-            project_path="/tmp/test_project",
-            model="opus",
-            session_id=None,
-            system_prompt="テスト",
-        )
+        cmd = bridge._build_command(model="opus")
 
         assert "--resume" not in cmd
 
@@ -52,10 +40,8 @@ class TestBuildCommand:
         from server.cli_bridge import CLIBridge
 
         bridge = CLIBridge()
-        cmd, cwd = bridge.build_command(
-            project_path="/tmp/test_project",
+        cmd = bridge._build_command(
             model="opus",
-            session_id=None,
             system_prompt="あなたはテスト用AIです",
         )
 

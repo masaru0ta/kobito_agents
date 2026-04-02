@@ -18,6 +18,7 @@ def mock_app():
     mock_config = MagicMock()
     mock_reader = MagicMock()
     mock_bridge = MagicMock()
+    mock_bridge.shutdown = AsyncMock()
 
     app = create_app(
         config_manager=mock_config,

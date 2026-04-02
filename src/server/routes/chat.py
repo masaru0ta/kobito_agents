@@ -21,6 +21,7 @@ class CLILaunchRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    model_tier: str | None = None
 
 
 @router.get("/sessions")
@@ -64,32 +65,133 @@ async def send_chat(
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
 
-    model = resolve_model(agent.cli, agent.model_tier)
+    tier = body.model_tier or agent.model_tier
+    model = resolve_model(agent.cli, tier)
+
+    import asyncio
 
     async def event_stream():
-        async for raw_event in bridge.run_stream(
-            project_path=agent.path,
-            prompt=body.message,
-            model=model,
-            session_id=body.session_id,
-            system_prompt=agent.system_prompt if not body.session_id else None,
-        ):
-            ev = parse_stream_event(raw_event)
-            if ev.event_type == "assistant" and ev.text:
-                yield f"data: {json.dumps({'type': 'chunk', 'data': ev.text}, ensure_ascii=False)}\n\n"
-                for tu in ev.tool_uses:
-                    desc = tu.get("name", "")
-                    inp = tu.get("input", {})
-                    if inp.get("file_path"):
-                        desc += f": {inp['file_path'].split('/')[-1].split(chr(92))[-1]}"
-                    elif inp.get("command"):
-                        desc += f": {inp['command'][:60]}"
-                    yield f"data: {json.dumps({'type': 'tool_use', 'data': desc}, ensure_ascii=False)}\n\n"
-            elif ev.event_type == "result":
-                yield f"data: {json.dumps({'type': 'session_id', 'data': ev.session_id}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        accumulated_text = ""
+        got_result = False
+        try:
+            stream = bridge.run_stream(
+                project_path=agent.path,
+                prompt=body.message,
+                model=model,
+                session_id=body.session_id,
+                system_prompt=agent.system_prompt if not body.session_id else None,
+            )
+            aiter = stream.__aiter__()
+            while True:
+                try:
+                    # 15秒待ってイベントが来なければpingを送り接続を維持する
+                    raw_event = await asyncio.wait_for(aiter.__anext__(), timeout=15.0)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                ev = parse_stream_event(raw_event)
+                if ev.event_type == "assistant" and ev.text:
+                    accumulated_text += ev.text
+                    yield f"data: {json.dumps({'type': 'chunk', 'data': accumulated_text}, ensure_ascii=False)}\n\n"
+                    for tu in ev.tool_uses:
+                        desc = tu.get("name", "")
+                        inp = tu.get("input", {})
+                        if inp.get("file_path"):
+                            desc += f": {inp['file_path'].split('/')[-1].split(chr(92))[-1]}"
+                        elif inp.get("command"):
+                            desc += f": {inp['command'][:60]}"
+                        yield f"data: {json.dumps({'type': 'tool_use', 'data': desc}, ensure_ascii=False)}\n\n"
+                elif ev.event_type == "result":
+                    got_result = True
+                    yield f"data: {json.dumps({'type': 'session_id', 'data': ev.session_id}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
+            return
+
+        if not got_result:
+            # プロセス異常終了などでresultイベントが来なかった場合
+            yield f"data: {json.dumps({'type': 'error', 'data': 'プロセスが予期せず終了しました'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+class TitleRequest(BaseModel):
+    title: str
+
+
+@router.put("/sessions/{session_id}/title")
+def update_session_title(
+    agent_id: str,
+    session_id: str,
+    body: TitleRequest,
+    config: ConfigManager = Depends(get_config_manager),
+):
+    try:
+        agent = config.get_agent(agent_id)
+    except AgentNotFoundError:
+        raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
+    from pathlib import Path
+    meta_dir = Path(agent.path) / ".kobito" / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = meta_dir / f"{session_id}.json"
+    meta = {}
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["title"] = body.title
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return {"status": "ok", "title": body.title}
+
+
+class ModelTierRequest(BaseModel):
+    model_tier: str
+
+
+@router.put("/sessions/{session_id}/model-tier")
+def update_session_model_tier(
+    agent_id: str,
+    session_id: str,
+    body: ModelTierRequest,
+    config: ConfigManager = Depends(get_config_manager),
+):
+    try:
+        agent = config.get_agent(agent_id)
+    except AgentNotFoundError:
+        raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
+    from pathlib import Path
+    meta_dir = Path(agent.path) / ".kobito" / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = meta_dir / f"{session_id}.json"
+    meta = {}
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["model_tier"] = body.model_tier
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return {"status": "ok"}
+
+
+@router.get("/process-status")
+def get_process_status(
+    agent_id: str,
+    watching: str | None = None,
+    config: ConfigManager = Depends(get_config_manager),
+    bridge: CLIBridge = Depends(get_cli_bridge),
+    reader: SessionReader = Depends(get_session_reader),
+):
+    """稼働中のセッションプロセス一覧 + 更新検知情報を返す"""
+    try:
+        agent = config.get_agent(agent_id)
+    except AgentNotFoundError:
+        raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
+    result = {
+        "active": bridge.active_session_ids(agent.path),
+        "dir_mtime": reader.get_dir_mtime(agent.path),
+    }
+    if watching:
+        result["watching_mtime"] = reader.get_session_mtime(agent.path, watching)
+    return result
 
 
 @router.post("/sessions/{session_id}/hide")

@@ -5,6 +5,11 @@ let currentAgentId = null;
 let currentSessionId = null;
 let agents = [];
 let sessionStates = {}; // { sessionId: 'idle' | 'waiting' | 'streaming' }
+let sessionModelTiers = {}; // { sessionId: 'deep' | 'quick' }
+let activeProcessSessions = new Set(); // 常駐プロセスが稼働中のセッションID
+let processStatusInterval = null;
+let lastDirMtime = 0;     // セッションディレクトリの前回mtime
+let lastWatchingMtime = 0; // 表示中セッションJSONLの前回mtime
 
 // ============================================================
 // 初期化
@@ -55,6 +60,50 @@ async function selectAgent(agentId) {
   await loadSessions();
   clearChat();
   loadSettingsData();
+  // エージェントのCLI種別に合わせてモデル選択肢を更新
+  const agent = agents.find(a => a.id === agentId);
+  if (agent) updateModelSelect(agent);
+  // プロセスステータスのポーリングを開始
+  startProcessStatusPolling();
+}
+
+async function pollProcessStatus() {
+  if (!currentAgentId) return;
+  try {
+    let url = `${API}/agents/${currentAgentId}/process-status`;
+    if (currentSessionId) url += `?watching=${currentSessionId}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    // プロセス稼働ドット更新
+    activeProcessSessions = new Set(data.active);
+    document.querySelectorAll('.conversation-item').forEach(el => {
+      const sid = el.dataset.sessionId;
+      el.classList.toggle('process-active', activeProcessSessions.has(sid));
+    });
+
+    // セッションディレクトリ変化 → 一覧を再取得
+    if (data.dir_mtime && data.dir_mtime !== lastDirMtime) {
+      if (lastDirMtime !== 0) await loadSessions();
+      lastDirMtime = data.dir_mtime;
+    }
+
+    // 表示中セッション変化 → 履歴を再取得（自分がストリーミング中でなければ）
+    if (data.watching_mtime && data.watching_mtime !== lastWatchingMtime) {
+      if (lastWatchingMtime !== 0 && !sessionStates[currentSessionId]) {
+        await loadSessionHistory(currentSessionId);
+      }
+      lastWatchingMtime = data.watching_mtime;
+    }
+  } catch (_) {}
+}
+
+function startProcessStatusPolling() {
+  if (processStatusInterval) clearInterval(processStatusInterval);
+  activeProcessSessions = new Set();
+  pollProcessStatus();
+  processStatusInterval = setInterval(pollProcessStatus, 5000);
 }
 
 // ============================================================
@@ -83,12 +132,20 @@ function renderSessions(sessions) {
     const statusHtml = state === 'waiting' || state === 'streaming'
       ? '<div class="conv-status"><div class="spinner"></div><span class="label">応答待ち</span></div>'
       : '';
+    const titleHtml = s.title
+      ? `<div class="conv-title">${escapeHtml(s.title)}</div>`
+      : '';
+    const isProcessActive = activeProcessSessions.has(s.session_id);
     return `
-      <div class="conversation-item${s.session_id === currentSessionId ? ' active' : ''}" data-session-id="${s.session_id}">
+      <div class="conversation-item${s.session_id === currentSessionId ? ' active' : ''}${isProcessActive ? ' process-active' : ''}" data-session-id="${s.session_id}">
         <div class="conv-header">
           <span class="conv-date">${date}</span>
-          <span class="conv-count">(${s.message_count})</span>
+          <span class="conv-header-right">
+            <span class="conv-count">(${s.message_count})</span>
+            <span class="process-dot" title="プロセス稼働中"></span>
+          </span>
         </div>
+        ${titleHtml}
         <div class="conv-preview">${escapeHtml(s.last_message)}</div>
         ${statusHtml}
       </div>
@@ -102,10 +159,31 @@ function renderSessions(sessions) {
 
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
+  lastWatchingMtime = 0; // セッション切替時にリセット
   // アクティブ状態を更新
   document.querySelectorAll('.conversation-item').forEach(el => {
     el.classList.toggle('active', el.dataset.sessionId === sessionId);
   });
+  // セッションごとのモデル選択を復元（メモリ→メタデータ→エージェントデフォルトの優先順）
+  const agent = agents.find(a => a.id === currentAgentId);
+  const sel = document.getElementById('model-select');
+  const inMemory = sessionModelTiers[sessionId];
+  if (inMemory) {
+    sel.value = inMemory;
+  } else {
+    // セッション一覧からメタデータのmodel_tierを取得
+    const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
+    const sessions = await resp.json();
+    const session = sessions.find(s => s.session_id === sessionId);
+    const metaTier = session?.model_tier;
+    if (metaTier) {
+      sel.value = metaTier;
+      sessionModelTiers[sessionId] = metaTier;
+    } else if (agent) {
+      sel.value = agent.model_tier || 'deep';
+    }
+  }
+  applyModelSelectStyle(sel);
   await loadSessionHistory(sessionId);
 }
 
@@ -113,16 +191,25 @@ async function selectSession(sessionId) {
 // チャット履歴
 // ============================================================
 
+let currentSessionTitle = '';
+
 async function loadSessionHistory(sessionId) {
   if (!currentAgentId || !sessionId) return;
   const resp = await fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}`);
   const messages = await resp.json();
   renderMessages(messages);
 
+  // セッション一覧からタイトルを取得
+  const sessResp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
+  const sessions = await sessResp.json();
+  const session = sessions.find(s => s.session_id === sessionId);
+  currentSessionTitle = session?.title || '';
+
   const date = messages.length > 0
     ? new Date(messages[0].timestamp).toLocaleString('ja-JP')
     : '';
-  document.getElementById('chat-title').textContent = date ? `${date} の会話` : '';
+  const titleEl = document.getElementById('chat-title');
+  titleEl.textContent = currentSessionTitle || (date ? `${date} の会話` : '');
 }
 
 function renderMessages(messages) {
@@ -173,9 +260,42 @@ function renderMessages(messages) {
   container.scrollTop = container.scrollHeight;
 }
 
+const MODEL_LABELS = {
+  claude: { deep: 'opus', quick: 'sonnet' },
+  codex:  { deep: 'o3',   quick: 'o4-mini' },
+};
+
+function updateModelSelect(agent) {
+  const sel = document.getElementById('model-select');
+  const labels = MODEL_LABELS[agent.cli] || MODEL_LABELS.claude;
+  sel.innerHTML = Object.entries(labels)
+    .map(([tier, label]) => `<option value="${tier}">${label}</option>`)
+    .join('');
+  sel.value = agent.model_tier || 'deep';
+  applyModelSelectStyle(sel);
+}
+
+function applyModelSelectStyle(sel) {
+  sel.classList.toggle('model-deep', sel.value === 'deep');
+  sel.classList.toggle('model-quick', sel.value === 'quick');
+}
+
 function clearChat() {
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-title').textContent = '';
+  currentSessionTitle = '';
+}
+
+async function saveSessionTitle(title) {
+  if (!currentAgentId || !currentSessionId) return;
+  await fetch(`${API}/agents/${currentAgentId}/sessions/${currentSessionId}/title`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  currentSessionTitle = title;
+  document.getElementById('chat-title').textContent = title || '';
+  await loadSessions();
 }
 
 function describeToolUse(tu) {
@@ -197,9 +317,25 @@ function initInput() {
 
   sendBtn.addEventListener('click', sendMessage);
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       sendMessage();
+    }
+  });
+
+  // モデル変更をセッションごとに記憶・保存
+  document.getElementById('model-select').addEventListener('change', async (e) => {
+    applyModelSelectStyle(e.target);
+    const tier = e.target.value;
+    const key = currentSessionId || 'new';
+    sessionModelTiers[key] = tier;
+    // セッションが確定している場合はメタデータに保存
+    if (currentSessionId && currentAgentId) {
+      await fetch(`${API}/agents/${currentAgentId}/sessions/${currentSessionId}/model-tier`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_tier: tier }),
+      });
     }
   });
 }
@@ -211,6 +347,14 @@ async function sendMessage() {
 
   input.value = '';
 
+  // 送信時のセッションIDを記憶（別セッションに切り替わっても追跡できるように）
+  const sentSessionId = currentSessionId;
+  const sentAgentId = currentAgentId;
+
+  // 現在のセッションを表示中かどうか判定するヘルパー
+  const isViewingThisSession = () =>
+    currentAgentId === sentAgentId && currentSessionId === sentSessionId;
+
   // ユーザーメッセージを即座に表示
   appendMessage('user', message);
 
@@ -218,13 +362,13 @@ async function sendMessage() {
   const thinkingEl = appendThinking();
 
   // セッション状態を更新
-  const sessionId = currentSessionId;
-  sessionStates[sessionId || 'new'] = 'waiting';
+  sessionStates[sentSessionId || 'new'] = 'waiting';
   await loadSessions();
 
   try {
-    const body = { message, session_id: currentSessionId };
-    const resp = await fetch(`${API}/agents/${currentAgentId}/chat`, {
+    const modelTier = document.getElementById('model-select').value;
+    const body = { message, session_id: sentSessionId, model_tier: modelTier };
+    const resp = await fetch(`${API}/agents/${sentAgentId}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -235,12 +379,12 @@ async function sendMessage() {
     const decoder = new TextDecoder();
     let fullResponse = '';
     let newSessionId = null;
+    let streamError = null;
 
-    sessionStates[sessionId || 'new'] = 'streaming';
+    sessionStates[sentSessionId || 'new'] = 'streaming';
 
-    // 考え中を消してアシスタントバブルを追加
-    thinkingEl.remove();
-    const bubbleEl = appendMessage('assistant', '');
+    // バブルは最初のチャンクが来た時点で作成する（それまで考え中表示を維持）
+    let bubbleEl = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -254,28 +398,96 @@ async function sendMessage() {
             const event = JSON.parse(line.slice(6));
             if (event.type === 'chunk') {
               fullResponse = event.data;
-              bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
+              if (isViewingThisSession()) {
+                // 最初のチャンクでバブルを作成（thinkingElはそのまま残す）
+                if (!bubbleEl) {
+                  bubbleEl = appendMessage('assistant', '');
+                }
+                bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
+              }
             } else if (event.type === 'tool_use') {
-              appendToolUse(event.data);
+              if (isViewingThisSession()) {
+                appendToolUse(event.data);
+              }
+            } else if (event.type === 'error') {
+              streamError = event.data;
             } else if (event.type === 'session_id') {
               newSessionId = event.data;
-              currentSessionId = newSessionId;
+              // 新規セッションのモデル選択を引き継ぎ、メタデータに保存
+              const newTier = sessionModelTiers['new'];
+              if (newTier) {
+                sessionModelTiers[newSessionId] = newTier;
+                delete sessionModelTiers['new'];
+                fetch(`${API}/agents/${sentAgentId}/sessions/${newSessionId}/model-tier`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ model_tier: newTier }),
+                });
+              }
+              // 新規セッションのID: ユーザーがまだこのセッションを見ている場合のみ更新
+              if (isViewingThisSession()) {
+                currentSessionId = newSessionId;
+              }
             }
           } catch (e) { /* 不正なJSON行は無視 */ }
         }
       }
-      document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+      // スクロールは表示中のセッションのみ
+      if (isViewingThisSession()) {
+        document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+      }
     }
 
-    // 完了
-    delete sessionStates[sessionId || 'new'];
+    // エラーの場合：メッセージ表示 + セッション履歴を再取得して正しい状態に復元
+    if (streamError) {
+      if (thinkingEl.parentNode) thinkingEl.remove();
+      if (isViewingThisSession()) {
+        appendMessage('assistant', `エラー: ${streamError}`);
+      }
+      delete sessionStates[sentSessionId || 'new'];
+      if (newSessionId) delete sessionStates['new'];
+      const resolvedSid = newSessionId || sentSessionId;
+      if (resolvedSid) {
+        await loadSessions();
+        if (currentAgentId === sentAgentId && currentSessionId === resolvedSid) {
+          await loadSessionHistory(resolvedSid);
+        }
+      }
+      return;
+    }
+
+    // 完了 — ストリーミング中はtextContentだったので、完了時にMarkdownレンダリング
+    if (bubbleEl && fullResponse && typeof marked !== 'undefined') {
+      bubbleEl.querySelector('.message-bubble').innerHTML = marked.parse(fullResponse);
+    }
+
+    delete sessionStates[sentSessionId || 'new'];
     if (newSessionId) delete sessionStates['new'];
     await loadSessions();
 
+    // ユーザーが別セッションを見ていた場合、考え中表示がまだDOMに残っている可能性
+    if (thinkingEl.parentNode) {
+      thinkingEl.remove();
+    }
+
   } catch (e) {
-    thinkingEl.remove();
-    delete sessionStates[sessionId || 'new'];
-    appendMessage('assistant', `エラー: ${e.message}`);
+    if (thinkingEl.parentNode) {
+      thinkingEl.remove();
+    }
+    delete sessionStates[sentSessionId || 'new'];
+    if (newSessionId) delete sessionStates['new'];
+
+    // ストリームが途切れた場合、セッション履歴を再読み込みして結果を表示する
+    const resolvedSessionId = newSessionId || sentSessionId;
+    if (resolvedSessionId) {
+      await loadSessions();
+      // 表示中のセッションなら履歴を再取得して最新状態を反映
+      if (currentAgentId === sentAgentId && currentSessionId === resolvedSessionId) {
+        await loadSessionHistory(resolvedSessionId);
+      }
+    } else if (isViewingThisSession()) {
+      appendMessage('assistant', `エラー: ${e.message}`);
+    }
   }
 }
 
@@ -301,7 +513,7 @@ function appendThinking() {
   const container = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className = 'thinking-indicator';
-  div.innerHTML = '<div class="spinner"></div> 考え中...';
+  div.innerHTML = '<div class="spinner"></div> 応答待ち';
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
@@ -417,6 +629,7 @@ function initActions() {
   // 非表示
   document.getElementById('btn-hide').addEventListener('click', async () => {
     if (!currentAgentId || !currentSessionId) return;
+    if (!confirm('この会話セッションをリストから非表示にしますか？')) return;
     await fetch(`${API}/agents/${currentAgentId}/sessions/${currentSessionId}/hide`, {
       method: 'POST',
     });
@@ -425,19 +638,20 @@ function initActions() {
     await loadSessions();
   });
 
-  // 要約
-  document.getElementById('btn-summarize').addEventListener('click', async () => {
-    if (!currentAgentId || !currentSessionId) return;
-    await fetch(`${API}/agents/${currentAgentId}/sessions/${currentSessionId}/summarize`, {
-      method: 'POST',
-    });
-  });
-
   // 新規会話
   document.getElementById('new-chat-btn').addEventListener('click', () => {
     currentSessionId = null;
     clearChat();
     document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+  });
+
+  // タイトル編集
+  const chatTitleEl = document.getElementById('chat-title');
+  chatTitleEl.addEventListener('click', () => {
+    if (!currentAgentId || !currentSessionId) return;
+    const newTitle = prompt('会話タイトルを入力', currentSessionTitle);
+    if (newTitle === null) return; // キャンセル
+    saveSessionTitle(newTitle);
   });
 }
 
