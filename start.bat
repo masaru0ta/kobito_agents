@@ -12,7 +12,7 @@ if not errorlevel 1 (
 
 echo Starting kobito_agents on port %PORT%...
 cd /d "%~dp0src"
-start "kobito_agents server" uvicorn server.app:app --host 127.0.0.1 --port %PORT% --reload --reload-dir server
+start "kobito_agents server" uvicorn server.app:app --host 0.0.0.0 --port %PORT% --reload --reload-dir server
 
 set count=0
 :wait

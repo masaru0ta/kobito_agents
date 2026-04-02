@@ -160,7 +160,7 @@ body {
 /* 右ペイン: 設定 */
 .settings-pane { display: none; flex-direction: column; overflow: hidden; flex: 1; min-width: 300px; }
 .settings-pane.visible { display: flex; }
-.settings-pane-header { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+.settings-pane-header { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 14px; font-weight: 500; color: var(--text-secondary); display: flex; align-items: center; gap: 12px; }
 .settings-pane-body { flex: 1; overflow-y: auto; padding: 24px; }
 .settings-field { margin-bottom: 20px; }
 .settings-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
@@ -168,6 +168,25 @@ body {
 .settings-field input:focus, .settings-field textarea:focus { border-color: var(--accent); }
 .settings-field textarea { min-height: 400px; resize: vertical; line-height: 1.6; }
 .settings-actions { padding: 16px 24px; border-top: 1px solid var(--border); background: var(--bg-secondary); display: flex; justify-content: flex-end; gap: 8px; }
+
+/* モバイル戻るボタン（デスクトップでは非表示） */
+.mobile-back-btn { display: none; padding: 5px 12px; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.mobile-back-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+
+/* レスポンシブ: 768px以下 */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .resize-handle { display: none; }
+  .mobile-back-btn { display: block; }
+  .middle-pane { width: 100% !important; flex-shrink: 0; }
+  .chat-pane { display: none; position: absolute; inset: 0; z-index: 10; }
+  .settings-pane { display: none; position: absolute; inset: 0; z-index: 10; }
+  .layout { position: relative; }
+  .layout.mobile-chat-active .middle-pane { display: none; }
+  .layout.mobile-chat-active .chat-pane { display: flex !important; }
+  .layout.mobile-chat-active .settings-pane.visible { display: flex !important; }
+  .message { max-width: 90%; }
+}
 
 /* スクロールバー */
 ::-webkit-scrollbar { width: 6px; }

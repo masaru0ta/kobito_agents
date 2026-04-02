@@ -63,6 +63,7 @@
   <!-- 右ペイン: チャット画面 -->
   <div class="chat-pane" id="chat-pane">
     <div class="chat-header">
+      <button class="mobile-back-btn" id="mobile-back-btn">← 戻る</button>
       <div class="chat-title-group">
         <span class="chat-title" id="chat-title" title="クリックして編集"></span>
         <select class="model-select header-model-select" id="model-select"></select>
@@ -86,7 +87,10 @@
 
   <!-- 右ペイン: 設定画面 -->
   <div class="settings-pane" id="settings-pane">
-    <div class="settings-pane-header" id="settings-pane-header"></div>
+    <div class="settings-pane-header">
+      <button class="mobile-back-btn" id="settings-back-btn">← 戻る</button>
+      <span id="settings-pane-header"></span>
+    </div>
     <div class="settings-pane-body">
       <div class="settings-field">
         <label>CLAUDE.md</label>

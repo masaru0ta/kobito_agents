@@ -193,6 +193,10 @@ function renderSessions(sessions, stateSnapshot) {
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
   lastWatchingMtime = 0; // セッション切替時にリセット
+  // モバイル: チャット画面に切り替え
+  if (isMobile()) {
+    document.querySelector('.layout').classList.add('mobile-chat-active');
+  }
   // アクティブ状態を更新
   document.querySelectorAll('.conversation-item').forEach(el => {
     el.classList.toggle('active', el.dataset.sessionId === sessionId);
@@ -623,7 +627,19 @@ async function loadSettingsData() {
   document.querySelector('[data-field="system-prompt"]').value = promptData.content || '';
 }
 
+function isMobile() {
+  return window.innerWidth <= 768;
+}
+
 function initActions() {
+  // モバイル: 戻るボタン
+  document.getElementById('mobile-back-btn').addEventListener('click', () => {
+    document.querySelector('.layout').classList.remove('mobile-chat-active');
+  });
+  document.getElementById('settings-back-btn').addEventListener('click', () => {
+    switchTab('chat');
+  });
+
   // 設定保存（中央ペイン）
   document.getElementById('settings-save-btn').addEventListener('click', async () => {
     await fetch(`${API}/agents/${currentAgentId}`, {
