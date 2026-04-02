@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -37,6 +38,8 @@ def create_app(
     if cli_bridge is None:
         cli_bridge = CLIBridge()
 
+    startup_id = str(uuid.uuid4())
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
@@ -47,6 +50,7 @@ def create_app(
     app.state.config_manager = config_manager
     app.state.session_reader = session_reader
     app.state.cli_bridge = cli_bridge
+    app.state.startup_id = startup_id
 
     app.include_router(agents_router)
     app.include_router(chat_router)

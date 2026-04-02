@@ -7,9 +7,11 @@ let agents = [];
 let sessionStates = {}; // { sessionId: 'idle' | 'waiting' | 'streaming' }
 let sessionModelTiers = {}; // { sessionId: 'deep' | 'quick' }
 let activeProcessSessions = new Set(); // 常駐プロセスが稼働中のセッションID
+let respondingSessions = new Set();   // バックエンドで応答処理中（ロック取得中）のセッションID
 let processStatusInterval = null;
 let lastDirMtime = 0;     // セッションディレクトリの前回mtime
 let lastWatchingMtime = 0; // 表示中セッションJSONLの前回mtime
+let lastStartupId = null;  // サーバー起動IDキャッシュ（変化でリロード検知）
 
 // ============================================================
 // 初期化
@@ -76,11 +78,38 @@ async function pollProcessStatus() {
     if (!resp.ok) return;
     const data = await resp.json();
 
+    // サーバー再起動検知
+    if (data.startup_id) {
+      if (lastStartupId && lastStartupId !== data.startup_id) {
+        sessionStates = {};
+        showToast('サーバーが再起動されました');
+        await loadSessions();
+        if (currentSessionId) await loadSessionHistory(currentSessionId);
+      }
+      lastStartupId = data.startup_id;
+    }
+
     // プロセス稼働ドット更新
     activeProcessSessions = new Set(data.active);
     document.querySelectorAll('.conversation-item').forEach(el => {
       const sid = el.dataset.sessionId;
       el.classList.toggle('process-active', activeProcessSessions.has(sid));
+    });
+
+    // バックエンド応答中セッションを確認し、フロントが見逃しているものを補完
+    respondingSessions = new Set(data.responding);
+    respondingSessions.forEach(sid => {
+      if (!sessionStates[sid]) {
+        sessionStates[sid] = 'streaming';
+        // セッション一覧のインジケーターをDOMに直接追加（再レンダリングなし）
+        const el = document.querySelector(`.conversation-item[data-session-id="${sid}"]`);
+        if (el && !el.querySelector('.conv-status')) {
+          const div = document.createElement('div');
+          div.className = 'conv-status';
+          div.innerHTML = '<div class="spinner"></div><span class="label">応答待ち</span>';
+          el.appendChild(div);
+        }
+      }
     });
 
     // セッションディレクトリ変化 → 一覧を再取得
@@ -102,6 +131,7 @@ async function pollProcessStatus() {
 function startProcessStatusPolling() {
   if (processStatusInterval) clearInterval(processStatusInterval);
   activeProcessSessions = new Set();
+  respondingSessions = new Set();
   pollProcessStatus();
   processStatusInterval = setInterval(pollProcessStatus, 5000);
 }
@@ -112,12 +142,15 @@ function startProcessStatusPolling() {
 
 async function loadSessions() {
   if (!currentAgentId) return;
+  // フェッチ開始時点のsessionStatesスナップショットを取る（非同期競合対策）
+  const stateSnapshot = { ...sessionStates };
   const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
   const sessions = await resp.json();
-  renderSessions(sessions);
+  renderSessions(sessions, stateSnapshot);
 }
 
-function renderSessions(sessions) {
+function renderSessions(sessions, stateSnapshot) {
+  const states = stateSnapshot || sessionStates;
   const list = document.getElementById('conversation-list');
   if (sessions.length === 0) {
     list.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center;">会話がありません</div>';
@@ -128,7 +161,7 @@ function renderSessions(sessions) {
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     });
-    const state = sessionStates[s.session_id];
+    const state = states[s.session_id];
     const statusHtml = state === 'waiting' || state === 'streaming'
       ? '<div class="conv-status"><div class="spinner"></div><span class="label">応答待ち</span></div>'
       : '';
@@ -399,15 +432,20 @@ async function sendMessage() {
             if (event.type === 'chunk') {
               fullResponse = event.data;
               if (isViewingThisSession()) {
-                // 最初のチャンクでバブルを作成（thinkingElはそのまま残す）
+                const container = document.getElementById('chat-messages');
                 if (!bubbleEl) {
                   bubbleEl = appendMessage('assistant', '');
                 }
                 bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
+                // thinkingElを常に末尾に移動してスクロールアウトを防ぐ
+                if (thinkingEl.parentNode) container.appendChild(thinkingEl);
               }
             } else if (event.type === 'tool_use') {
               if (isViewingThisSession()) {
+                const container = document.getElementById('chat-messages');
                 appendToolUse(event.data);
+                // tool_use追加後もthinkingElを末尾に移動
+                if (thinkingEl.parentNode) container.appendChild(thinkingEl);
               }
             } else if (event.type === 'error') {
               streamError = event.data;
@@ -709,6 +747,18 @@ function initResize() {
 // ============================================================
 // ユーティリティ
 // ============================================================
+
+function showToast(message, duration = 4000) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('toast-visible'));
+  setTimeout(() => {
+    toast.classList.remove('toast-visible');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
 
 function escapeHtml(text) {
   const div = document.createElement('div');

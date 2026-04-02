@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from server.config import AgentNotFoundError, ConfigManager
 from server.session_reader import SessionReader
 from server.cli_bridge import CLIBridge, parse_stream_event, resolve_model
-from server.routes.deps import get_config_manager, get_session_reader, get_cli_bridge
+from server.routes.deps import get_config_manager, get_session_reader, get_cli_bridge, get_startup_id
 
 router = APIRouter(prefix="/api/agents/{agent_id}", tags=["chat"])
 
@@ -112,8 +112,8 @@ async def send_chat(
             return
 
         if not got_result:
-            # プロセス異常終了などでresultイベントが来なかった場合
-            yield f"data: {json.dumps({'type': 'error', 'data': 'プロセスが予期せず終了しました'}, ensure_ascii=False)}\n\n"
+            # プロセス異常終了などでresultイベントが来なかった場合（サーバー再起動時を含む）
+            yield f"data: {json.dumps({'type': 'error', 'data': 'サーバーが再起動されました。再度送信してください。'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -179,6 +179,7 @@ def get_process_status(
     config: ConfigManager = Depends(get_config_manager),
     bridge: CLIBridge = Depends(get_cli_bridge),
     reader: SessionReader = Depends(get_session_reader),
+    startup_id: str = Depends(get_startup_id),
 ):
     """稼働中のセッションプロセス一覧 + 更新検知情報を返す"""
     try:
@@ -186,7 +187,9 @@ def get_process_status(
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
     result = {
+        "startup_id": startup_id,
         "active": bridge.active_session_ids(agent.path),
+        "responding": bridge.responding_session_ids(agent.path),
         "dir_mtime": reader.get_dir_mtime(agent.path),
     }
     if watching:

@@ -318,6 +318,17 @@ class CLIBridge:
             self._cleanup_task.cancel()
         self._kill_all_sync()
 
+    def responding_session_ids(self, project_path: str) -> list[str]:
+        """指定プロジェクトで現在応答処理中（ロック取得中）のセッションIDを返す"""
+        prefix = f"{project_path}::"
+        result = []
+        for key, mp in self._pool.items():
+            if key.startswith(prefix) and mp.alive and mp.lock.locked():
+                sid = key[len(prefix):]
+                if not sid.startswith("new-"):
+                    result.append(sid)
+        return result
+
     def active_session_ids(self, project_path: str) -> list[str]:
         """指定プロジェクトで稼働中のセッションIDを返す"""
         prefix = f"{project_path}::"
