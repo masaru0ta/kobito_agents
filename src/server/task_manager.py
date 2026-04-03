@@ -151,8 +151,6 @@ class TaskManager:
         meta = self._read_meta(task_id)
         meta.approval = "approved"
         meta.approved_at = datetime.now(timezone.utc).isoformat()
-        meta.rejected_at = None
-        meta.reject_reason = ""
         self._write_meta(meta)
         order = self._read_order()
         if task_id not in order:
