@@ -274,6 +274,79 @@ kobito_agents/
         tasks.py        ← 追加
 ```
 
+## タスクコンテキスト注入
+
+セッション開始時に、タスク情報・承認状態・制約事項を含むコンテキストブロックをプロンプトに自動注入する。
+
+### 目的
+
+「タスクについて話す」「1ステップ作業する」でセッションを開始する際、AIエージェントがタスクファイルを自力で読みに行く必要をなくし、構造化されたコンテキストを即座に提供する。
+
+### データフロー
+
+```
+フロント                          バックエンド
+───────                          ──────────
+POST /api/agents/{id}/chat
+  message: "..."
+  task_id: "task_xxx"       ──→  TaskManager.get_task(task_id)
+  task_mode: "work"|"talk"       ↓
+                                 テンプレート読み込み（assets/prompts/task_{mode}.md）
+                                 ↓
+                                 プレースホルダ展開
+                                 ↓
+                                 prompt = context_block + "\n\n" + message
+                                 ↓
+                                 CLIBridge.run_stream(prompt=prompt, ...)
+```
+
+### ChatRequest拡張
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| task_id | string | — | 対象タスクID。指定時にコンテキスト注入が発動 |
+| task_mode | string | — | `work`（自律作業）/ `talk`（相談）。デフォルト: `work` |
+
+### テンプレート
+
+`assets/prompts/` に配置する。`str.format()` で展開される。
+
+| ファイル | 用途 |
+|---------|------|
+| `task_work.md` | 自律作業セッション用 |
+| `task_talk.md` | 相談セッション用 |
+
+#### プレースホルダ
+
+| プレースホルダ | 値の出典 |
+|--------------|---------|
+| `{title}` | タスクfrontmatter `title` |
+| `{phase}` | タスクfrontmatter `phase` |
+| `{approval}` | タスクメタデータ `approval` |
+| `{task_body}` | タスクMDのfrontmatter以降の本文 |
+
+#### 作業モードの制約（`task_work.md`）
+
+- 次の未完了ステップを1つだけ実行する
+- 完了したらタスクファイルのチェックボックスを更新する
+
+#### 相談モードの制約（`task_talk.md`）
+
+- コードの変更やファイル操作は行わない
+- タスクの内容・方針・設計について対話し、合意形成を目的とする
+- 結論が出た場合はタスクファイルへの反映方針を提案し、実行は作業セッションに委ねる
+
+### コンテキスト生成モジュール
+
+`src/server/task_context.py` に `build_task_context(task, mode)` 関数を配置する。
+
+- テンプレートファイルが存在しないmodeが渡された場合は `FileNotFoundError` を送出する（不正なmode値はバグ）
+- 注入ポイントは `src/server/routes/chat.py` の `send_chat` 関数内、`bridge.run_stream()` 呼び出しの直前
+
+### フロントエンド変更
+
+既存の `openTalkSession()` と `startWorkSession()` で `POST /chat` を呼ぶ際に `task_id` と `task_mode` を追加送信する。メッセージ文面自体は従来通り（コンテキストはバックエンドが付加するため）。
+
 ## Phase 2でやらないこと
 
 - スケジューラーエンジン本体（仕様のみ定義済み）

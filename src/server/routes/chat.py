@@ -22,6 +22,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     model_tier: str | None = None
+    task_id: str | None = None
+    task_mode: str | None = None
 
 
 @router.get("/sessions")
@@ -68,6 +70,19 @@ async def send_chat(
     tier = body.model_tier or agent.model_tier
     model = resolve_model(agent.cli, tier)
 
+    # タスクコンテキスト注入
+    prompt = body.message
+    if body.task_id:
+        from server.task_manager import TaskManager
+        from server.task_context import build_task_context
+        tm = TaskManager(agent.path)
+        try:
+            task = tm.get_task(body.task_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"タスク '{body.task_id}' が見つかりません")
+        context = build_task_context(task, body.task_mode or "work")
+        prompt = context + "\n\n" + body.message
+
     import asyncio
 
     async def event_stream():
@@ -76,7 +91,7 @@ async def send_chat(
         try:
             stream = bridge.run_stream(
                 project_path=agent.path,
-                prompt=body.message,
+                prompt=prompt,
                 model=model,
                 session_id=body.session_id,
                 system_prompt=agent.system_prompt if not body.session_id else None,

@@ -26,6 +26,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   initActions();
   initTasks();
   initResponsive();
+
+  // サーバー再起動ボタン
+  document.getElementById('restart-btn').addEventListener('click', async () => {
+    if (!confirm('サーバーを再起動しますか？')) return;
+    try {
+      await fetch(`${API}/restart`, { method: 'POST' });
+    } catch (_) {}
+    showToast('サーバーを再起動しています...');
+    // サーバー復帰を待ってリロード
+    const wait = () => new Promise(r => setTimeout(r, 2000));
+    for (let i = 0; i < 15; i++) {
+      await wait();
+      try {
+        const resp = await fetch(`${API}/agents`);
+        if (resp.ok) { location.reload(); return; }
+      } catch (_) {}
+    }
+    showToast('再起動がタイムアウトしました');
+  });
 });
 
 // ============================================================
@@ -255,6 +274,10 @@ async function loadSessionHistory(sessionId, force = false) {
   if (!currentAgentId || !sessionId) return;
   const cache = sessionDomCache[sessionId];
 
+  // セッション一覧からタイトルを取得（キャッシュ有効でも常に更新）
+  const currentSession = sessions.find(s => s.session_id === sessionId);
+  currentSessionTitle = currentSession?.title || '';
+
   // キャッシュが有効 (stale でない) 場合はメッセージ再取得をスキップ
   if (!force && cache && !cache.stale) {
     cache.el.scrollTop = cache.el.scrollHeight;
@@ -265,12 +288,6 @@ async function loadSessionHistory(sessionId, force = false) {
   const resp = await fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}`);
   const messages = await resp.json();
   renderMessages(messages, sessionId);
-
-  // セッション一覧からタイトルを取得
-  const sessResp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
-  const sessions = await sessResp.json();
-  const session = sessions.find(s => s.session_id === sessionId);
-  currentSessionTitle = session?.title || '';
 
   const date = messages.length > 0
     ? new Date(messages[0].timestamp).toLocaleString('ja-JP')
@@ -436,7 +453,7 @@ async function openTalkSession(taskId) {
 
   const input = document.getElementById('chat-input');
   input.value = `タスク「${task.title}」について話したい。`;
-  await sendMessage();
+  await sendMessage({ task_id: taskId, task_mode: 'talk' });
 
   // 送信後のセッション一覧から新規セッションを特定
   await loadSessions();
@@ -471,7 +488,7 @@ async function startWorkSession(taskId, message) {
 
   const input = document.getElementById('chat-input');
   input.value = message;
-  await sendMessage();
+  await sendMessage({ task_id: taskId, task_mode: 'work' });
 
   if (currentSessionId) {
     await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/sessions`, {
@@ -482,7 +499,7 @@ async function startWorkSession(taskId, message) {
   }
 }
 
-async function sendMessage() {
+async function sendMessage(opts = {}) {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
   if (!message || !currentAgentId) return;
@@ -515,6 +532,8 @@ async function sendMessage() {
   try {
     const modelTier = document.getElementById('model-select').value;
     const body = { message, session_id: sentSessionId, model_tier: modelTier };
+    if (opts.task_id) body.task_id = opts.task_id;
+    if (opts.task_mode) body.task_mode = opts.task_mode;
     const resp = await fetch(`${API}/agents/${sentAgentId}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -754,7 +773,6 @@ function switchTab(tabName) {
   } else if (tabName === 'settings') {
     chatPane.classList.add('hidden');
     settingsPane.classList.add('visible');
-    settingsPane.style.display = 'flex';
     loadSettingsData();
   }
 }
@@ -1067,7 +1085,7 @@ function renderTaskList() {
   let queueIdx = 0;
   taskExecutionOrder.forEach((id) => {
     const task = tasksCache[id];
-    if (!task || task.approval !== 'approved') return;
+    if (!task || task.approval !== 'approved' || task.phase === 'done') return;
     queueIdx++;
     const active = id === currentTaskId ? ' active' : '';
     const indicator = task.phase === 'doing'
@@ -1304,6 +1322,7 @@ function enterTaskEditMode() {
       body: JSON.stringify({ body }),
     });
     await loadTasks();
+    showToast('保存しました');
   });
 }
 

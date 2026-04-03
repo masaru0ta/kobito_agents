@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>kobito_agents</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=2">
 </head>
 <body>
 
@@ -15,6 +15,9 @@
     <div class="sidebar-header">kobito_agents</div>
     <div class="sidebar-section-label">エージェント</div>
     <div class="agent-list" id="agent-list"></div>
+    <div class="sidebar-footer">
+      <button class="restart-btn" id="restart-btn">&#x21bb; サーバー再起動</button>
+    </div>
   </div>
 
   <!-- 中央ペイン: タブ + コンテンツ -->
@@ -81,9 +84,14 @@
         <span class="chat-title" id="chat-title" title="クリックして編集"></span>
         <select class="model-select header-model-select" id="model-select"></select>
       </div>
-      <div class="chat-actions">
-        <button class="chat-action-btn cli" id="btn-cli">CLI</button>
-        <button class="chat-action-btn hide" id="btn-hide">非表示</button>
+      <div class="chat-menu-wrapper">
+        <button class="chat-menu-btn" id="chat-menu-btn">⋮</button>
+        <div class="chat-menu" id="chat-menu">
+          <div class="chat-menu-item" id="btn-edit-title">タイトル編集</div>
+          <div class="chat-menu-item" id="btn-cli">CLIで開く</div>
+          <div class="chat-menu-divider"></div>
+          <div class="chat-menu-item chat-menu-danger" id="btn-hide">非表示にする</div>
+        </div>
       </div>
     </div>
     <div id="chat-messages-host"></div>

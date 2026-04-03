@@ -12,20 +12,16 @@ if not errorlevel 1 (
 
 echo Starting kobito_agents on port %PORT%...
 cd /d "%~dp0src"
-start "kobito_agents server" uvicorn server.app:app --host 0.0.0.0 --port %PORT% --reload --reload-dir server
 
-set count=0
-:wait
-ping -n 2 127.0.0.1 >nul 2>&1
-curl -s --connect-timeout 1 http://localhost:%PORT%/api/agents >nul 2>&1
-if not errorlevel 1 goto ready
-set /a count=count+1
-if %count% GEQ 30 (
-    echo Error: Server startup timed out
-    exit /b 1
+set FIRST=1
+
+:loop
+if "%FIRST%"=="1" (
+    set FIRST=0
+    start "" cmd /c "ping -n 5 127.0.0.1 >nul 2>&1 && start http://localhost:%PORT%"
 )
-goto wait
-
-:ready
-echo Server ready
-start http://localhost:%PORT%
+echo [%date% %time%] Server starting...
+uvicorn server.app:app --host 0.0.0.0 --port %PORT%
+echo [%date% %time%] Server exited. Restarting in 2 seconds...
+ping -n 3 127.0.0.1 >nul 2>&1
+goto loop

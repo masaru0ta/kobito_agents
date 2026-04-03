@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -55,6 +57,13 @@ def create_app(
     app.state.session_reader = session_reader
     app.state.cli_bridge = cli_bridge
     app.state.startup_id = startup_id
+
+    @app.post("/api/restart")
+    async def restart_server():
+        """サーバーを再起動する。ラッパースクリプトが再起動を担う。"""
+        await cli_bridge.shutdown()
+        os.kill(os.getpid(), signal.SIGTERM)
+        return {"status": "restarting"}
 
     app.include_router(agents_router)
     app.include_router(chat_router)
