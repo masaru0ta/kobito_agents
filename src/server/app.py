@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from server.config import ConfigManager
 from server.session_reader import SessionReader, ClaudeSessionReader
-from server.cli_bridge import CLIBridge
+from server.cli_bridge import CLIBridge, cleanup_orphaned_processes
 from server.routes.agents import router as agents_router
 from server.routes.chat import router as chat_router
 from server.routes.tasks import router as tasks_router
@@ -43,6 +43,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # 起動時: 前回サーバーの孤児プロセスをクリーンアップ
+        for agent in config_manager.list_agents():
+            cleanup_orphaned_processes(agent.path)
         yield
         await cli_bridge.shutdown()
 

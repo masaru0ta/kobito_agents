@@ -188,8 +188,7 @@ def get_process_status(
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
     result = {
         "startup_id": startup_id,
-        "active": bridge.active_session_ids(agent.path),
-        "responding": bridge.responding_session_ids(agent.path),
+        "inferring": bridge.inferring_session_ids(agent.path),
         "dir_mtime": reader.get_dir_mtime(agent.path),
     }
     if watching:

@@ -6,12 +6,16 @@ import asyncio
 import atexit
 import json
 import logging
+import os
 import shutil
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import AsyncGenerator
+
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,91 @@ def parse_stream_event(event: dict) -> StreamEvent:
     )
 
 
+# ============================================================
+# PID ファイル管理
+# ============================================================
+
+def _alive_dir(project_path: str) -> Path:
+    """PID ファイル置き場: {project}/.kobito/alive/"""
+    d = Path(project_path) / ".kobito" / "alive"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _write_pid_file(project_path: str, session_id: str, pid: int) -> None:
+    """プロセス起動時に PID を記録する"""
+    if not session_id or session_id.startswith("new-"):
+        return
+    path = _alive_dir(project_path) / f"{session_id}.pid"
+    path.write_text(str(pid), encoding="utf-8")
+
+
+def _remove_pid_file(project_path: str, session_id: str) -> None:
+    """プロセス終了時に PID ファイルを削除する"""
+    if not session_id:
+        return
+    path = _alive_dir(project_path) / f"{session_id}.pid"
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+# ============================================================
+# 推論中判定（TCP コネクション検査）
+# ============================================================
+
+def _has_api_connection(pid: int) -> bool:
+    """プロセス（と子プロセス）が port 443 への TCP 接続を持っているか判定する。
+    接続があれば Anthropic API と通信中 = 推論中と見なす。"""
+    try:
+        proc = psutil.Process(pid)
+        for p in [proc] + proc.children(recursive=True):
+            try:
+                for conn in p.net_connections():
+                    if (conn.raddr
+                            and conn.raddr.port == 443
+                            and conn.status == "ESTABLISHED"):
+                        return True
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+        return False
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+
+def cleanup_orphaned_processes(project_path: str) -> None:
+    """サーバー起動時に呼ぶ。PID ファイルから孤児プロセスを検出し、
+    推論が終わっているものは kill してクリーンアップする。"""
+    d = Path(project_path) / ".kobito" / "alive"
+    if not d.exists():
+        return
+    for pid_file in d.glob("*.pid"):
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            os.kill(pid, 0)  # 生存確認
+            if not _has_api_connection(pid):
+                # 推論終了済み → kill
+                try:
+                    psutil.Process(pid).terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+                pid_file.unlink(missing_ok=True)
+                logger.info(f"孤児プロセス終了: PID={pid} session={pid_file.stem}")
+            else:
+                logger.info(f"孤児プロセス推論中: PID={pid} session={pid_file.stem}")
+        except (OSError, ValueError):
+            # プロセスが既に死んでいる or 不正ファイル
+            try:
+                pid_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+# ============================================================
+# ManagedProcess
+# ============================================================
+
 @dataclass
 class ManagedProcess:
     """セッションに紐づく常駐claudeプロセス"""
@@ -85,6 +174,7 @@ class ManagedProcess:
     reader_thread: threading.Thread | None = None
     session_id: str = ""
     model: str = ""
+    project_path: str = ""
     last_used: float = field(default_factory=time.time)
     _loop: asyncio.AbstractEventLoop | None = None
 
@@ -109,7 +199,7 @@ class ManagedProcess:
                         pass
             except Exception:
                 pass
-            # プロセス終了を通知
+            _remove_pid_file(self.project_path, self.session_id)
             loop.call_soon_threadsafe(self.queue.put_nowait, {"type": "_process_exit"})
 
         self.reader_thread = threading.Thread(target=_read, daemon=True)
@@ -137,6 +227,10 @@ class ManagedProcess:
             except Exception:
                 pass
 
+
+# ============================================================
+# CLIBridge
+# ============================================================
 
 class CLIBridge:
     """常駐プロセスプールを管理するCLIブリッジ"""
@@ -222,9 +316,11 @@ class CLIBridge:
             # 新規作成
             cmd = self._build_command(model, session_id, system_prompt)
             proc = self._spawn_process(project_path, cmd)
-            mp = ManagedProcess(proc=proc, model=model, session_id=session_id or "")
+            mp = ManagedProcess(proc=proc, model=model, session_id=session_id or "", project_path=project_path)
             loop = asyncio.get_running_loop()
             mp.start_reader(loop)
+            if session_id:
+                _write_pid_file(project_path, session_id, proc.pid)
             self._pool[key] = mp
             logger.info(f"プロセス起動: {key} (model={model})")
 
@@ -257,35 +353,38 @@ class CLIBridge:
 
             mp.send_message(prompt)
 
-            while True:
-                try:
-                    event = await asyncio.wait_for(mp.queue.get(), timeout=300)
-                except asyncio.TimeoutError:
-                    logger.warning(f"タイムアウト: {key}")
-                    break
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(mp.queue.get(), timeout=300)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"タイムアウト: {key}")
+                        break
 
-                if event.get("type") == "_process_exit":
-                    # プロセスが死んだ場合、プールから除去
-                    async with self._pool_lock:
-                        self._pool.pop(key, None)
-                    break
-
-                # resultイベントでsession_idを更新
-                if event.get("type") == "result":
-                    new_sid = event.get("session_id", "")
-                    if new_sid and not mp.session_id:
-                        mp.session_id = new_sid
-                        # 新規セッションのキーを確定IDに付け替え
-                        real_key = self._pool_key(project_path, new_sid)
+                    if event.get("type") == "_process_exit":
                         async with self._pool_lock:
-                            if key in self._pool:
-                                self._pool[real_key] = self._pool.pop(key)
-                                key = real_key
+                            self._pool.pop(key, None)
+                        break
 
-                yield event
+                    # resultイベントでsession_idを更新
+                    if event.get("type") == "result":
+                        new_sid = event.get("session_id", "")
+                        if new_sid and not mp.session_id:
+                            mp.session_id = new_sid
+                            # PID ファイルを確定セッションIDで書き直す
+                            _write_pid_file(project_path, new_sid, mp.proc.pid)
+                            real_key = self._pool_key(project_path, new_sid)
+                            async with self._pool_lock:
+                                if key in self._pool:
+                                    self._pool[real_key] = self._pool.pop(key)
+                                    key = real_key
 
-                if event.get("type") == "result":
-                    break
+                    yield event
+
+                    if event.get("type") == "result":
+                        break
+            finally:
+                pass
 
     async def _cleanup_loop(self) -> None:
         """アイドルプロセスを定期的に終了する"""
@@ -307,38 +406,70 @@ class CLIBridge:
                 break
 
     def _kill_all_sync(self) -> None:
-        """サーバー停止時に全プロセスを終了する（同期版）"""
+        """全プロセスを即座に終了する（同期版）"""
         for key, mp in list(self._pool.items()):
+            _remove_pid_file(mp.project_path, mp.session_id)
             mp.kill()
         self._pool.clear()
 
     async def shutdown(self) -> None:
-        """サーバー停止時に全プロセスを終了する（非同期版）"""
+        """サーバー停止時: 推論中プロセスの完了を待ってから全終了する"""
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
+        # 推論中のプロセスがあれば完了を待つ（最大60秒）
+        for _ in range(60):
+            any_inferring = any(
+                _has_api_connection(mp.proc.pid)
+                for mp in self._pool.values() if mp.alive
+            )
+            if not any_inferring:
+                break
+            await asyncio.sleep(1)
         self._kill_all_sync()
 
-    def responding_session_ids(self, project_path: str) -> list[str]:
-        """指定プロジェクトで現在応答処理中（ロック取得中）のセッションIDを返す"""
+    def inferring_session_ids(self, project_path: str) -> list[str]:
+        """推論中のセッションIDを返す。
+        プロセスプール内のプロセスと、PIDファイルで追跡中の孤児プロセスの両方を検査する。"""
         prefix = f"{project_path}::"
         result = []
-        for key, mp in self._pool.items():
-            if key.startswith(prefix) and mp.alive and mp.lock.locked():
-                sid = key[len(prefix):]
-                if not sid.startswith("new-"):
-                    result.append(sid)
-        return result
+        pool_sids = set()
 
-    def active_session_ids(self, project_path: str) -> list[str]:
-        """指定プロジェクトで稼働中のセッションIDを返す"""
-        prefix = f"{project_path}::"
-        result = []
+        # 1. プロセスプール内のプロセスを検査
         for key, mp in self._pool.items():
             if key.startswith(prefix) and mp.alive:
                 sid = key[len(prefix):]
-                # 新規セッション用の一時キー（new-...）は除外
                 if not sid.startswith("new-"):
-                    result.append(sid)
+                    pool_sids.add(sid)
+                    if _has_api_connection(mp.proc.pid):
+                        result.append(sid)
+
+        # 2. PID ファイルから孤児プロセスを検査
+        d = Path(project_path) / ".kobito" / "alive"
+        if d.exists():
+            for pid_file in d.glob("*.pid"):
+                sid = pid_file.stem
+                if sid in pool_sids:
+                    continue  # プール内で既に検査済み
+                try:
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                    os.kill(pid, 0)  # 生存確認
+                    if _has_api_connection(pid):
+                        result.append(sid)
+                    else:
+                        # 推論終了済みの孤児 → kill してクリーンアップ
+                        try:
+                            psutil.Process(pid).terminate()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                        pid_file.unlink(missing_ok=True)
+                        logger.info(f"孤児プロセス終了: PID={pid} session={sid}")
+                except (OSError, ValueError):
+                    # プロセス死亡 or 不正ファイル → PID ファイル削除
+                    try:
+                        pid_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
         return result
 
     def launch_cli(self, project_path: str, session_id: str | None = None) -> None:

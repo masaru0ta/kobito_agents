@@ -17,8 +17,6 @@ class TaskMeta(BaseModel):
     task_id: str
     approval: str = "pending"  # pending / approved / rejected
     approved_at: Optional[str] = None
-    rejected_at: Optional[str] = None
-    reject_reason: str = ""
     sessions: list[str] = []
     talk_session_id: Optional[str] = None
 
@@ -32,8 +30,6 @@ class Task(BaseModel):
     schedule: Optional[str] = None
     approval: str
     approved_at: Optional[str] = None
-    rejected_at: Optional[str] = None
-    reject_reason: str = ""
     sessions: list[str] = []
     talk_session_id: Optional[str] = None
     body: str = ""
@@ -113,8 +109,6 @@ class TaskManager:
             schedule=fm.get("schedule") or None,
             approval=meta.approval,
             approved_at=meta.approved_at,
-            rejected_at=meta.rejected_at,
-            reject_reason=meta.reject_reason,
             sessions=meta.sessions,
             talk_session_id=meta.talk_session_id,
             body=body,
@@ -166,18 +160,6 @@ class TaskManager:
             self._write_order(order)
         return self.get_task(task_id)
 
-    def reject(self, task_id: str, reason: str = "") -> Task:
-        self.get_task(task_id)
-        meta = self._read_meta(task_id)
-        meta.approval = "rejected"
-        meta.rejected_at = datetime.now(timezone.utc).isoformat()
-        meta.reject_reason = reason
-        self._write_meta(meta)
-        order = self._read_order()
-        if task_id in order:
-            order.remove(task_id)
-            self._write_order(order)
-        return self.get_task(task_id)
 
     def force_done(self, task_id: str) -> Task:
         self.get_task(task_id)

@@ -48,18 +48,6 @@ async def approve_task(agent_id: str, task_id: str, cfg: ConfigManager = Depends
         raise HTTPException(status_code=404, detail=f"タスク '{task_id}' が見つかりません")
 
 
-class RejectBody(BaseModel):
-    reason: str = ""
-
-
-@router.post("/api/agents/{agent_id}/tasks/{task_id}/reject")
-async def reject_task(agent_id: str, task_id: str, body: RejectBody, cfg: ConfigManager = Depends(get_config_manager)):
-    tm = _tm(agent_id, cfg)
-    try:
-        return tm.reject(task_id, body.reason).model_dump()
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"タスク '{task_id}' が見つかりません")
-
 
 @router.post("/api/agents/{agent_id}/tasks/{task_id}/force-done")
 async def force_done(agent_id: str, task_id: str, cfg: ConfigManager = Depends(get_config_manager)):

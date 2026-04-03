@@ -22,12 +22,12 @@
     <div class="tabs">
       <button class="sidebar-toggle" id="sidebar-toggle" title="エージェント一覧">☰</button>
       <div class="tab active" data-tab="chat">セッション</div>
-      <div class="tab" data-tab="tasks">タスク<span class="tab-badge" id="pending-badge" style="display:none;"></span></div>
+      <div class="tab" data-tab="tasks">タスク</div>
       <div class="tab" data-tab="settings">設定</div>
     </div>
 
     <!-- 会話タブ -->
-    <div id="chat-tab-content">
+    <div id="chat-tab-content" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
       <div class="new-chat-btn" id="new-chat-btn">+ 新規会話</div>
       <div class="conversation-list" id="conversation-list"></div>
     </div>
@@ -129,17 +129,6 @@
   <div class="context-menu-item ctx-danger" id="ctx-delete">削除</div>
 </div>
 
-<!-- タスク: 却下ダイアログ -->
-<div id="task-reject-dialog" class="dialog-overlay">
-  <div class="dialog-box">
-    <h3>タスクを却下</h3>
-    <textarea id="reject-reason" placeholder="却下理由を入力（任意）"></textarea>
-    <div class="dialog-actions">
-      <button class="chat-action-btn" id="reject-cancel">キャンセル</button>
-      <button class="dialog-danger-btn" id="reject-confirm">却下する</button>
-    </div>
-  </div>
-</div>
 
 <script src="/marked.min.js"></script>
 <script src="/app.js?v=2"></script>

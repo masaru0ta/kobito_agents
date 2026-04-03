@@ -5,10 +5,8 @@ let currentAgentId = null;
 let currentSessionId = null;
 let agents = [];
 let sessions = [];
-let sessionStates = {}; // { sessionId: 'idle' | 'waiting' | 'streaming' }
+let inferringSessions = new Set(); // 推論中のセッションID（バックエンド権威 + 送信時の楽観更新）
 let sessionModelTiers = {}; // { sessionId: 'deep' | 'quick' }
-let activeProcessSessions = new Set(); // 常駐プロセスが稼働中のセッションID
-let respondingSessions = new Set();   // バックエンドで応答処理中（ロック取得中）のセッションID
 let processStatusInterval = null;
 let lastDirMtime = 0;     // セッションディレクトリの前回mtime
 let lastWatchingMtime = 0; // 表示中セッションJSONLの前回mtime
@@ -88,7 +86,6 @@ async function pollProcessStatus() {
     // サーバー再起動検知
     if (data.startup_id) {
       if (lastStartupId && lastStartupId !== data.startup_id) {
-        sessionStates = {};
         showToast('サーバーが再起動されました');
         await loadSessions();
         if (currentSessionId) await loadSessionHistory(currentSessionId);
@@ -96,52 +93,14 @@ async function pollProcessStatus() {
       lastStartupId = data.startup_id;
     }
 
-    // バックエンドで応答が完了したセッションの残留インジケーターを除去
-    // （SSEストリームが切断等で thinkingEl が残ったまま responding=false になった場合）
-    const prevResponding = respondingSessions;
+    // バックエンドの推論中判定を権威とし、インジケータを同期する
+    const prev = inferringSessions;
+    inferringSessions = new Set(data.inferring);
+    syncInferringIndicators(prev, inferringSessions);
 
-    // プロセス稼働ドット更新
-    activeProcessSessions = new Set(data.active);
-    document.querySelectorAll('.conversation-item').forEach(el => {
-      const sid = el.dataset.sessionId;
-      el.classList.toggle('process-active', activeProcessSessions.has(sid));
-    });
-
-    // バックエンド応答中セッションを確認し、フロントが見逃しているものを補完
-    respondingSessions = new Set(data.responding);
-    // 前回 responding だったが今回なくなったセッション → 残留 thinkingEl を除去
-    prevResponding.forEach(sid => {
-      if (!respondingSessions.has(sid) && !sessionStates[sid]) {
-        const container = getSessionContainer(sid);
-        const ind = container.querySelector('.thinking-indicator');
-        if (ind) { ind._stopTimer?.(); ind.remove(); }
-      }
-    });
-    respondingSessions.forEach(sid => {
-      if (!sessionStates[sid]) {
-        sessionStates[sid] = 'streaming';
-        // セッション一覧のインジケーターをDOMに直接追加（再レンダリングなし）
-        const el = document.querySelector(`.conversation-item[data-session-id="${sid}"]`);
-        if (el && !el.querySelector('.conv-status')) {
-          const div = document.createElement('div');
-          div.className = 'conv-status';
-          div.innerHTML = '<div class="spinner"></div><span class="label">応答待ち</span>';
-          el.appendChild(div);
-        }
-        // 現在表示中のセッションなら、会話ウィンドウにも thinkingEl を復元
-        if (sid === currentSessionId) {
-          const container = getSessionContainer(sid);
-          if (!container.querySelector('.thinking-indicator')) {
-            appendThinking();
-          }
-        }
-      }
-    });
-
-    // セッションディレクトリ変化 → 一覧を再取得 + 現在表示中以外のキャッシュを無効化
+    // セッションディレクトリ変化 → 一覧を再取得 + キャッシュ無効化
     if (data.dir_mtime && data.dir_mtime !== lastDirMtime) {
       if (lastDirMtime !== 0) {
-        // 現在表示中以外のキャッシュを stale にする（表示中は後続の watching_mtime で対処）
         Object.entries(sessionDomCache).forEach(([key, cache]) => {
           if (key !== currentSessionId) cache.stale = true;
         });
@@ -151,12 +110,8 @@ async function pollProcessStatus() {
     }
 
     // 表示中セッション変化 → 履歴を強制再取得
-    // 再起動待機中(restart-waiting)も含む。アクティブストリーミング中(streaming/waiting)は除く
     if (data.watching_mtime && data.watching_mtime !== lastWatchingMtime) {
-      const st = sessionStates[currentSessionId];
-      const canReload = !st || st === 'restart-waiting';
-      if (lastWatchingMtime !== 0 && canReload) {
-        delete sessionStates[currentSessionId]; // 再起動待機状態を解除
+      if (lastWatchingMtime !== 0 && !inferringSessions.has(currentSessionId)) {
         await loadSessionHistory(currentSessionId, true);
         await loadSessions();
       }
@@ -165,10 +120,39 @@ async function pollProcessStatus() {
   } catch (_) {}
 }
 
+function syncInferringIndicators(prev, current) {
+  // 推論終了したセッション → インジケータ除去
+  prev.forEach(sid => {
+    if (!current.has(sid)) {
+      const container = getSessionContainer(sid);
+      const ind = container.querySelector('.thinking-indicator');
+      if (ind) { ind._stopTimer?.(); ind.remove(); }
+      const el = document.querySelector(`.conversation-item[data-session-id="${sid}"] .conv-status`);
+      if (el) el.remove();
+      if (sid === currentSessionId) loadSessionHistory(sid, true);
+    }
+  });
+  // 推論開始を検知（バックエンドで検知したがフロントに反映されていない）→ インジケータ追加
+  current.forEach(sid => {
+    if (!prev.has(sid)) {
+      const el = document.querySelector(`.conversation-item[data-session-id="${sid}"]`);
+      if (el && !el.querySelector('.conv-status')) {
+        const div = document.createElement('div');
+        div.className = 'conv-status';
+        div.innerHTML = '<div class="spinner"></div><span class="label">応答待ち</span>';
+        el.appendChild(div);
+      }
+      if (sid === currentSessionId) {
+        const container = getSessionContainer(sid);
+        if (!container.querySelector('.thinking-indicator')) appendThinking();
+      }
+    }
+  });
+}
+
 function startProcessStatusPolling() {
   if (processStatusInterval) clearInterval(processStatusInterval);
-  activeProcessSessions = new Set();
-  respondingSessions = new Set();
+  inferringSessions = new Set();
   const poll = () => { pollProcessStatus(); loadTasks(); };
   poll();
   processStatusInterval = setInterval(poll, 5000);
@@ -180,15 +164,12 @@ function startProcessStatusPolling() {
 
 async function loadSessions() {
   if (!currentAgentId) return;
-  // フェッチ開始時点のsessionStatesスナップショットを取る（非同期競合対策）
-  const stateSnapshot = { ...sessionStates };
   const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
   sessions = await resp.json();
-  renderSessions(sessions, stateSnapshot);
+  renderSessions(sessions);
 }
 
-function renderSessions(sessions, stateSnapshot) {
-  const states = stateSnapshot || sessionStates;
+function renderSessions(sessions) {
   const list = document.getElementById('conversation-list');
   if (sessions.length === 0) {
     list.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center;">会話がありません</div>';
@@ -199,23 +180,19 @@ function renderSessions(sessions, stateSnapshot) {
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     });
-    const state = states[s.session_id];
-    // sessionStates（フロント管理）またはrespondingSessions（バックエンド実態）のどちらかが応答中なら表示
-    const isResponding = state === 'waiting' || state === 'streaming' || state === 'restart-waiting' || respondingSessions.has(s.session_id);
-    const statusHtml = isResponding
+    const isInferring = inferringSessions.has(s.session_id);
+    const statusHtml = isInferring
       ? '<div class="conv-status"><div class="spinner"></div><span class="label">応答待ち</span></div>'
       : '';
     const titleHtml = s.title
       ? `<div class="conv-title">${escapeHtml(s.title)}</div>`
       : '';
-    const isProcessActive = activeProcessSessions.has(s.session_id);
     return `
-      <div class="conversation-item${s.session_id === currentSessionId ? ' active' : ''}${isProcessActive ? ' process-active' : ''}" data-session-id="${s.session_id}">
+      <div class="conversation-item${s.session_id === currentSessionId ? ' active' : ''}" data-session-id="${s.session_id}">
         <div class="conv-header">
           <span class="conv-date">${date}</span>
           <span class="conv-header-right">
             <span class="conv-count">(${s.message_count})</span>
-            <span class="process-dot" title="プロセス稼働中"></span>
           </span>
         </div>
         ${titleHtml}
@@ -527,8 +504,8 @@ async function sendMessage() {
   // 考え中表示
   const thinkingEl = appendThinking();
 
-  // セッション状態を更新
-  sessionStates[sentSessionId || 'new'] = 'waiting';
+  // 楽観的にインジケータ表示
+  inferringSessions.add(sentSessionId || 'new');
   await loadSessions();
 
   try {
@@ -546,8 +523,6 @@ async function sendMessage() {
     let fullResponse = '';
     let newSessionId = null;
     let streamError = null;
-
-    sessionStates[sentSessionId || 'new'] = 'streaming';
 
     // ストリーミング書き込み先コンテナ（キャッシュから取得）
     let streamContainer = getSessionContainer(sentSessionId);
@@ -618,71 +593,33 @@ async function sendMessage() {
       }
     }
 
-    // エラーの場合
+    // エラーの場合: インジケーターを維持し、ポーリングに判断を委ねる
     if (streamError) {
-      const isRestartError = streamError.includes('再起動');
-      const resolvedSid = newSessionId || sentSessionId;
-
-      if (isRestartError) {
-        // サーバー再起動エラー: CLIサブプロセスは生き続けている可能性があるため
-        // インジケーターを消さず継続待機（watching_mtime でファイル変化を検知して自動解除）
+      if (streamError.includes('再起動')) {
         showToast('サーバーが再起動されました。応答を受信待ちです...');
-        // 'restart-waiting' 状態にする（session一覧表示は維持、watching_mtimeで再取得可能にする）
-        sessionStates[sentSessionId || 'new'] = 'restart-waiting';
-        await loadSessions();
-        // thinkingEl はそのまま残す（ポーリングの watching_mtime 検知で自動解除）
-      } else {
-        // 通常エラー: インジケーターを消してエラーメッセージを表示
-        if (thinkingEl.parentNode) { thinkingEl._stopTimer?.(); thinkingEl.remove(); }
-        if (isViewingThisSession()) {
-          appendMessage('assistant', `エラー: ${streamError}`);
-        }
-        delete sessionStates[sentSessionId || 'new'];
-        if (newSessionId) delete sessionStates['new'];
-        if (resolvedSid) {
-          await loadSessions();
-          if (currentAgentId === sentAgentId && currentSessionId === resolvedSid) {
-            await loadSessionHistory(resolvedSid);
-          }
-        }
       }
+      await loadSessions();
       return;
     }
 
-    // 完了 — ストリーミング中はtextContentだったので、完了時にMarkdownレンダリング
+    // 完了 — Markdownレンダリング
     if (bubbleEl && fullResponse && typeof marked !== 'undefined') {
       bubbleEl.querySelector('.message-bubble').innerHTML = marked.parse(fullResponse);
     }
 
-    delete sessionStates[sentSessionId || 'new'];
-    if (newSessionId) delete sessionStates['new'];
+    // 推論完了 → インジケータ除去
+    inferringSessions.delete(sentSessionId || 'new');
+    if (newSessionId) inferringSessions.delete('new');
     await loadSessions();
 
-    // ユーザーが別セッションを見ていた場合、考え中表示がまだDOMに残っている可能性
     if (thinkingEl.parentNode) {
       thinkingEl._stopTimer?.();
       thinkingEl.remove();
     }
 
   } catch (e) {
-    if (thinkingEl.parentNode) {
-      thinkingEl._stopTimer?.();
-      thinkingEl.remove();
-    }
-    delete sessionStates[sentSessionId || 'new'];
-    if (newSessionId) delete sessionStates['new'];
-
-    // ストリームが途切れた場合、セッション履歴を再読み込みして結果を表示する
-    const resolvedSessionId = newSessionId || sentSessionId;
-    if (resolvedSessionId) {
-      await loadSessions();
-      // 表示中のセッションなら履歴を再取得して最新状態を反映
-      if (currentAgentId === sentAgentId && currentSessionId === resolvedSessionId) {
-        await loadSessionHistory(resolvedSessionId);
-      }
-    } else if (isViewingThisSession()) {
-      appendMessage('assistant', `エラー: ${e.message}`);
-    }
+    // SSEストリーム切断 — インジケーターを維持し、ポーリングに判断を委ねる
+    await loadSessions();
   }
 }
 
@@ -790,7 +727,7 @@ function switchTab(tabName) {
   settingsPane.classList.remove('visible');
 
   if (tabName === 'chat') {
-    chatContent.style.display = '';
+    chatContent.style.display = 'flex';
     chatPane.classList.remove('hidden');
   } else if (tabName === 'tasks') {
     tasksContent.style.display = 'flex';
@@ -916,6 +853,10 @@ function initActions() {
     clearChat();
     activateSessionContainer(null); // 新規入力用の空コンテナを表示
     document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+    // モバイル: チャット画面に切り替え
+    if (isMobile()) {
+      document.querySelector('.layout').classList.add('mobile-chat-active');
+    }
   });
 
   // タイトル編集
@@ -1002,7 +943,6 @@ function showToast(message, duration = 4000) {
 let currentTaskId = null;
 let showingDoneHistory = false;
 let taskContextMenuId = null;
-let pendingRejectTaskId = null;
 
 // キャッシュ
 let tasksCache = {};         // task_id → task
@@ -1070,20 +1010,6 @@ function initTasks() {
     await loadTasks();
   });
 
-  document.getElementById('reject-cancel').addEventListener('click', hideRejectDialog);
-  document.getElementById('reject-confirm').addEventListener('click', async () => {
-    if (!pendingRejectTaskId) return;
-    const reason = document.getElementById('reject-reason').value;
-    await fetch(`${API}/agents/${currentAgentId}/tasks/${pendingRejectTaskId}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
-    });
-    const tid = pendingRejectTaskId;
-    hideRejectDialog();
-    await loadTasks();
-    if (currentTaskId === tid) renderTaskDetail(tid);
-  });
 }
 
 function updatePendingBadge() {
@@ -1140,18 +1066,6 @@ function renderTaskList() {
       </div>`;
   });
 
-  Object.values(tasksCache).filter(t => t.approval === 'rejected').forEach(task => {
-    const active = task.task_id === currentTaskId ? ' active' : '';
-    html += `
-      <div class="task-item${active}" data-task-id="${task.task_id}" style="opacity:0.4;">
-        <div class="task-item-header">
-          <div class="task-title-group">
-            <span class="task-item-title">${escapeHtml(task.title)}</span>
-          </div>
-        </div>
-        <div class="task-item-meta"><span class="badge" style="background:#f8514933;color:var(--danger);border:1px solid var(--danger);">却下</span><span>${formatTaskDate(task.created)}</span></div>
-      </div>`;
-  });
 
   const doneTasks = Object.values(tasksCache)
     .filter(t => t.phase === 'done' && t.approval === 'approved')
@@ -1238,17 +1152,12 @@ function renderTaskDetail(taskId) {
   if (task.approval === 'pending') {
     approvalHtml = `
       <button class="approval-btn approve" data-approve="${taskId}">承認</button>
-      <button class="approval-btn reject" data-reject="${taskId}">却下</button>`;
+`;
   } else if (task.approval === 'approved') {
     const dt = task.approved_at
       ? new Date(task.approved_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
       : '';
     approvalHtml = `<div class="approval-status-badge approved">✓ 承認済み${dt ? ' (' + dt + ')' : ''}</div>`;
-  } else if (task.approval === 'rejected') {
-    const dt = task.rejected_at
-      ? new Date(task.rejected_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : '';
-    approvalHtml = `<div class="approval-status-badge rejected">✗ 却下${dt ? ' (' + dt + ')' : ''}</div>`;
   }
 
   const phaseLabel = { draft: '未着手', doing: '実行中', done: '完了' }[task.phase] ?? task.phase;
@@ -1329,10 +1238,6 @@ function renderTaskDetail(taskId) {
     await loadTasks();
   });
 
-  bodyEl.querySelector(`[data-reject="${taskId}"]`)?.addEventListener('click', () => {
-    pendingRejectTaskId = taskId;
-    showRejectDialog();
-  });
 }
 
 function enterTaskEditMode() {
@@ -1370,15 +1275,6 @@ function formatTaskDate(iso) {
   return d.toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function showRejectDialog() {
-  document.getElementById('reject-reason').value = '';
-  document.getElementById('task-reject-dialog').classList.add('visible');
-}
-
-function hideRejectDialog() {
-  document.getElementById('task-reject-dialog').classList.remove('visible');
-  pendingRejectTaskId = null;
-}
 
 function initTaskDragDrop() {
   let dragRowId = null;

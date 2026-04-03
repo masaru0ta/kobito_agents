@@ -182,3 +182,4 @@ class ClaudeSessionReader(SessionReader):
 
         events = self._parse_jsonl(jsonl_path)
         return self._extract_messages(events)
+
