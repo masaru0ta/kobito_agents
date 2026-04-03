@@ -6,6 +6,7 @@ let currentSessionId = null;
 let agents = [];
 let sessions = [];
 let inferringSessions = new Set(); // 推論中のセッションID（バックエンド権威 + 送信時の楽観更新）
+let activeStreams = new Set();    // SSEストリーム中のセッションID
 let sessionModelTiers = {}; // { sessionId: 'deep' | 'quick' }
 let processStatusInterval = null;
 let lastDirMtime = 0;     // セッションディレクトリの前回mtime
@@ -110,8 +111,9 @@ async function pollProcessStatus() {
     }
 
     // 表示中セッション変化 → 履歴を強制再取得
+    // SSEストリーム中のみスキップ（推論中でもSSEがなければ更新する）
     if (data.watching_mtime && data.watching_mtime !== lastWatchingMtime) {
-      if (lastWatchingMtime !== 0 && !inferringSessions.has(currentSessionId)) {
+      if (lastWatchingMtime !== 0 && !activeStreams.has(currentSessionId)) {
         await loadSessionHistory(currentSessionId, true);
         await loadSessions();
       }
@@ -505,7 +507,9 @@ async function sendMessage() {
   const thinkingEl = appendThinking();
 
   // 楽観的にインジケータ表示
-  inferringSessions.add(sentSessionId || 'new');
+  const streamKey = sentSessionId || 'new';
+  inferringSessions.add(streamKey);
+  activeStreams.add(streamKey);
   await loadSessions();
 
   try {
@@ -577,6 +581,9 @@ async function sendMessage() {
                 const oldKey = sentSessionId || 'new';
                 currentSessionId = newSessionId;
                 sentSessionId = newSessionId; // isViewingThisSession()が以降もtrueを返すように同期
+                // activeStreamsのキーも新IDに移行
+                activeStreams.delete(oldKey);
+                activeStreams.add(newSessionId);
                 if (sessionDomCache[oldKey] && !sessionDomCache[newSessionId]) {
                   sessionDomCache[newSessionId] = sessionDomCache[oldKey];
                   delete sessionDomCache[oldKey];
@@ -593,8 +600,11 @@ async function sendMessage() {
       }
     }
 
-    // エラーの場合: インジケーターを維持し、ポーリングに判断を委ねる
+    // エラーの場合: ストリーム追跡は解除し、インジケーターはポーリングに委ねる
     if (streamError) {
+      activeStreams.delete(sentSessionId || 'new');
+      if (newSessionId) activeStreams.delete('new');
+      lastWatchingMtime = 0;
       if (streamError.includes('再起動')) {
         showToast('サーバーが再起動されました。応答を受信待ちです...');
       }
@@ -607,9 +617,15 @@ async function sendMessage() {
       bubbleEl.querySelector('.message-bubble').innerHTML = marked.parse(fullResponse);
     }
 
-    // 推論完了 → インジケータ除去
+    // 推論完了 → インジケータ除去・ストリーム追跡解除
     inferringSessions.delete(sentSessionId || 'new');
-    if (newSessionId) inferringSessions.delete('new');
+    activeStreams.delete(sentSessionId || 'new');
+    if (newSessionId) {
+      inferringSessions.delete('new');
+      activeStreams.delete('new');
+    }
+    // SSE中にスキップされたwatching_mtime変化を次のポーリングで拾うためリセット
+    lastWatchingMtime = 0;
     await loadSessions();
 
     if (thinkingEl.parentNode) {
@@ -618,7 +634,9 @@ async function sendMessage() {
     }
 
   } catch (e) {
-    // SSEストリーム切断 — インジケーターを維持し、ポーリングに判断を委ねる
+    // SSEストリーム切断 — ストリーム追跡は解除し、インジケーターはポーリングに委ねる
+    activeStreams.delete(sentSessionId || 'new');
+    lastWatchingMtime = 0;
     await loadSessions();
   }
 }
@@ -825,8 +843,27 @@ function initActions() {
     loadSettingsData();
   });
 
-  // CLI起動
+  // チャットメニュー開閉
+  const chatMenuBtn = document.getElementById('chat-menu-btn');
+  const chatMenu = document.getElementById('chat-menu');
+  chatMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    chatMenu.classList.toggle('open');
+  });
+  document.addEventListener('click', () => chatMenu.classList.remove('open'));
+
+  // メニュー: タイトル編集
+  document.getElementById('btn-edit-title').addEventListener('click', () => {
+    chatMenu.classList.remove('open');
+    if (!currentAgentId || !currentSessionId) return;
+    const newTitle = prompt('会話タイトルを入力', currentSessionTitle);
+    if (newTitle === null) return;
+    saveSessionTitle(newTitle);
+  });
+
+  // メニュー: CLI起動
   document.getElementById('btn-cli').addEventListener('click', async () => {
+    chatMenu.classList.remove('open');
     if (!currentAgentId) return;
     await fetch(`${API}/agents/${currentAgentId}/cli`, {
       method: 'POST',
@@ -835,8 +872,9 @@ function initActions() {
     });
   });
 
-  // 非表示
+  // メニュー: 非表示
   document.getElementById('btn-hide').addEventListener('click', async () => {
+    chatMenu.classList.remove('open');
     if (!currentAgentId || !currentSessionId) return;
     if (!confirm('この会話セッションをリストから非表示にしますか？')) return;
     await fetch(`${API}/agents/${currentAgentId}/sessions/${currentSessionId}/hide`, {
@@ -859,12 +897,11 @@ function initActions() {
     }
   });
 
-  // タイトル編集
-  const chatTitleEl = document.getElementById('chat-title');
-  chatTitleEl.addEventListener('click', () => {
+  // タイトルクリック編集（メニューからも可能）
+  document.getElementById('chat-title').addEventListener('click', () => {
     if (!currentAgentId || !currentSessionId) return;
     const newTitle = prompt('会話タイトルを入力', currentSessionTitle);
-    if (newTitle === null) return; // キャンセル
+    if (newTitle === null) return;
     saveSessionTitle(newTitle);
   });
 }
