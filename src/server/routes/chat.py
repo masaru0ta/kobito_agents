@@ -83,8 +83,6 @@ async def send_chat(
         context = build_task_context(task, body.task_mode or "work")
         prompt = context + "\n\n" + body.message
 
-    import asyncio
-
     async def event_stream():
         accumulated_text = ""
         got_result = False
@@ -96,14 +94,9 @@ async def send_chat(
                 session_id=body.session_id,
                 system_prompt=agent.system_prompt if not body.session_id else None,
             )
-            aiter = stream.__aiter__()
-            while True:
-                try:
-                    # 15秒待ってイベントが来なければpingを送り接続を維持する
-                    raw_event = await asyncio.wait_for(aiter.__anext__(), timeout=15.0)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
+            async for raw_event in stream:
+                # _ping は接続維持のためのダミーイベント（15秒無応答時にrun_stream側で生成）
+                if raw_event.get("type") == "_ping":
                     yield ": ping\n\n"
                     continue
                 ev = parse_stream_event(raw_event)
@@ -123,11 +116,13 @@ async def send_chat(
                     yield f"data: {json.dumps({'type': 'session_id', 'data': ev.session_id}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            print(f"[STREAM] 例外発生 agent={agent_id} sid={body.session_id}: {type(e).__name__}: {e}", flush=True)
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
             return
 
         if not got_result:
             # プロセス異常終了などでresultイベントが来なかった場合（サーバー再起動時を含む）
+            print(f"[STREAM] got_result=False agent={agent_id} sid={body.session_id} (プロセス異常終了またはサーバー再起動)", flush=True)
             yield f"data: {json.dumps({'type': 'error', 'data': 'サーバーが再起動されました。再度送信してください。'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -205,6 +200,7 @@ def get_process_status(
         "startup_id": startup_id,
         "inferring": bridge.inferring_session_ids(agent.path),
         "dir_mtime": reader.get_dir_mtime(agent.path),
+        "processes": bridge.process_debug_info(agent.path),
     }
     if watching:
         result["watching_mtime"] = reader.get_session_mtime(agent.path, watching)

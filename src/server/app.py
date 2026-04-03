@@ -8,6 +8,8 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -45,10 +47,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        print(f"[SERVER] 起動 startup_id={startup_id}", flush=True)
         # 起動時: 前回サーバーの孤児プロセスをクリーンアップ
         for agent in config_manager.list_agents():
             cleanup_orphaned_processes(agent.path)
         yield
+        print(f"[SERVER] 終了 startup_id={startup_id}", flush=True)
         await cli_bridge.shutdown()
 
     app = FastAPI(title="kobito_agents", lifespan=lifespan)

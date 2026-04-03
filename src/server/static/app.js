@@ -106,7 +106,8 @@ async function pollProcessStatus() {
     // サーバー再起動検知
     if (data.startup_id) {
       if (lastStartupId && lastStartupId !== data.startup_id) {
-        showToast('サーバーが再起動されました');
+        console.warn('[RESTART] startup_id変化 (ポーリング検知):', lastStartupId, '->', data.startup_id, new Date().toISOString());
+        showToast(`サーバーが再起動されました [${data.startup_id.slice(0, 8)}]`);
         await loadSessions();
         if (currentSessionId) await loadSessionHistory(currentSessionId);
       }
@@ -117,6 +118,9 @@ async function pollProcessStatus() {
     const prev = inferringSessions;
     inferringSessions = new Set(data.inferring);
     syncInferringIndicators(prev, inferringSessions);
+
+    // プロセスデバッグ情報を表示
+    renderProcessDebug(data.processes || []);
 
     // セッションディレクトリ変化 → 一覧を再取得 + キャッシュ無効化
     if (data.dir_mtime && data.dir_mtime !== lastDirMtime) {
@@ -141,6 +145,33 @@ async function pollProcessStatus() {
   } catch (_) {}
 }
 
+function renderProcessDebug(processes) {
+  const el = document.getElementById('process-debug');
+  if (!processes.length) { el.innerHTML = ''; return; }
+  const items = processes.map(p => {
+    const s = sessions.find(s => s.session_id === p.session_id);
+    const title = s?.title || s?.last_message?.slice(0, 20) || p.session_id.slice(0, 8);
+    const srcTag = p.source === 'pidfile' ? ' [孤児]' : '';
+    const tcp = p.connected ? '接続中' : 'なし';
+    const tcpClass = p.connected ? 'connected' : 'alive';
+    const jsonlRole = p.jsonl_last_role ?? '-';
+    const jsonlClass = p.jsonl_last_role === 'assistant' ? 'alive' : p.jsonl_last_role === 'user' ? 'connected' : 'alive';
+    const inferLabel = p.inferring ? '推論中' : '待機';
+    const inferClass = p.inferring ? 'connected' : 'alive';
+    // 安定性は推論中のときのみ表示
+    const stableSpan = p.inferring
+      ? (() => {
+          const label = p.jsonl_stable == null ? '-'
+            : p.jsonl_stable ? `安定(${p.jsonl_stable_secs ?? '?'}s)` : `変化中(${p.jsonl_stable_secs ?? '?'}s)`;
+          const cls = p.jsonl_stable ? 'alive' : 'connected';
+          return `<span class="process-debug-status ${cls}">${label}</span>`;
+        })()
+      : '';
+    return `<div class="process-debug-item"><span class="process-debug-sid" title="${p.session_id}">PID:${p.pid} ${escapeHtml(title)}${srcTag}</span></div><div class="process-debug-item process-debug-sub"><span class="process-debug-status ${inferClass}">${inferLabel}</span><span class="process-debug-status ${tcpClass}">TCP:${tcp}</span><span class="process-debug-status ${jsonlClass}">JSONL:${jsonlRole}</span>${stableSpan}</div>`;
+  }).join('');
+  el.innerHTML = `<div class="process-debug-title">プロセス (${processes.length})</div>${items}`;
+}
+
 function syncInferringIndicators(prev, current) {
   // 推論終了したセッション → インジケータ除去
   prev.forEach(sid => {
@@ -150,7 +181,7 @@ function syncInferringIndicators(prev, current) {
       if (ind) { ind._stopTimer?.(); ind.remove(); }
       const el = document.querySelector(`.conversation-item[data-session-id="${sid}"] .conv-status`);
       if (el) el.remove();
-      if (sid === currentSessionId) loadSessionHistory(sid, true);
+      if (sid === currentSessionId && !activeStreams.has(sid)) loadSessionHistory(sid, true);
     }
   });
   // 推論開始を検知（バックエンドで検知したがフロントに反映されていない）→ インジケータ追加
@@ -163,7 +194,9 @@ function syncInferringIndicators(prev, current) {
         div.innerHTML = '<div class="spinner"></div><span class="label">応答待ち</span>';
         el.appendChild(div);
       }
-      if (sid === currentSessionId) {
+      // ストリームが既に終了済みのセッションには thinkingEl を再追加しない
+      // （レスポンス受信後にバックエンドがJSONL安定待ちで推論中返すことで起きるフリッカー防止）
+      if (sid === currentSessionId && activeStreams.has(sid)) {
         const container = getSessionContainer(sid);
         if (!container.querySelector('.thinking-indicator')) appendThinking();
       }
@@ -581,6 +614,7 @@ async function sendMessage(opts = {}) {
               }
             } else if (event.type === 'error') {
               streamError = event.data;
+              console.error('[STREAM] error event受信:', event.data);
             } else if (event.type === 'session_id') {
               newSessionId = event.data;
               // 新規セッションのモデル選択を引き継ぎ、メタデータに保存
@@ -625,6 +659,7 @@ async function sendMessage(opts = {}) {
       if (newSessionId) activeStreams.delete('new');
       lastWatchingMtime = 0;
       if (streamError.includes('再起動')) {
+        console.warn('[STREAM] 再起動検知(SSEエラー) sid:', sentSessionId, 'error:', streamError);
         showToast('サーバーが再起動されました。応答を受信待ちです...');
       }
       await loadSessions();
@@ -1011,7 +1046,6 @@ async function loadTasks() {
     data.tasks.forEach(t => { tasksCache[t.task_id] = t; });
     taskExecutionOrder = data.order || [];
     renderTaskList();
-    updatePendingBadge();
     if (currentTaskId && tasksCache[currentTaskId]) {
       renderTaskDetail(currentTaskId);
     }
@@ -1067,16 +1101,6 @@ function initTasks() {
 
 }
 
-function updatePendingBadge() {
-  const count = Object.values(tasksCache).filter(t => t.approval === 'pending').length;
-  const badge = document.getElementById('pending-badge');
-  if (count > 0) {
-    badge.textContent = count;
-    badge.style.display = '';
-  } else {
-    badge.style.display = 'none';
-  }
-}
 
 function renderTaskList() {
   const list = document.getElementById('task-list');
@@ -1108,7 +1132,7 @@ function renderTaskList() {
     html += `<div class="task-drop-end" id="task-drop-end"></div>`;
   }
 
-  Object.values(tasksCache).filter(t => t.approval === 'pending').forEach(task => {
+  Object.values(tasksCache).filter(t => t.approval !== 'approved' && t.phase !== 'done').forEach(task => {
     const active = task.task_id === currentTaskId ? ' active' : '';
     html += `
       <div class="task-item${active}" data-task-id="${task.task_id}">

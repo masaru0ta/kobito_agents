@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 class TaskMeta(BaseModel):
     task_id: str
-    approval: str = "pending"  # pending / approved / rejected
+    approval: str = "pending"  # pending / approved
     approved_at: Optional[str] = None
     sessions: list[str] = []
     talk_session_id: Optional[str] = None
@@ -63,11 +63,18 @@ class TaskManager:
     # 内部ヘルパー
     # ----------------------------------------------------------------
 
+    _VALID_APPROVALS = {"pending", "approved"}
+
     def _read_meta(self, task_id: str) -> TaskMeta:
         meta_file = self._meta_dir / f"{task_id}.json"
         if meta_file.exists():
             data = json.loads(meta_file.read_text(encoding="utf-8"))
-            return TaskMeta(**data)
+            meta = TaskMeta(**data)
+            # 仕様外の approval 値を pending に正規化
+            if meta.approval not in self._VALID_APPROVALS:
+                meta.approval = "pending"
+                self._write_meta(meta)
+            return meta
         return TaskMeta(task_id=task_id)
 
     def _write_meta(self, meta: TaskMeta) -> None:

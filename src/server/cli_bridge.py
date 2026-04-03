@@ -81,6 +81,45 @@ def parse_stream_event(event: dict) -> StreamEvent:
 
 
 # ============================================================
+# JSONL 末尾確認
+# ============================================================
+
+def _jsonl_info(project_path: str, session_id: str) -> tuple[str | None, float]:
+    """JSONLの末尾を読み、(最後のuser/assistantのrole, ファイルmtime) を返す。"""
+    if not session_id or session_id.startswith("new-"):
+        return None, 0.0
+    project_hash = (
+        project_path.replace("\\", "-").replace(":", "-")
+        .replace("/", "-").replace("_", "-")
+    )
+    jsonl_path = Path.home() / ".claude" / "projects" / project_hash / f"{session_id}.jsonl"
+    if not jsonl_path.exists():
+        return None, 0.0
+    try:
+        mtime = jsonl_path.stat().st_mtime
+        # 末尾16KBだけ読む（大きなファイルへの配慮）
+        with open(jsonl_path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 16384))
+            tail = f.read().decode("utf-8", errors="replace")
+        for line in reversed(tail.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                t = data.get("type")
+                if t in ("user", "assistant"):
+                    return t, mtime
+            except json.JSONDecodeError:
+                continue
+    except Exception:
+        pass
+    return None, 0.0
+
+
+# ============================================================
 # PID ファイル管理
 # ============================================================
 
@@ -121,7 +160,7 @@ def _has_api_connection(pid: int) -> bool:
         proc = psutil.Process(pid)
         for p in [proc] + proc.children(recursive=True):
             try:
-                for conn in p.net_connections():
+                for conn in p.connections():
                     if (conn.raddr
                             and conn.raddr.port == 443
                             and conn.status == "ESTABLISHED"):
@@ -165,6 +204,9 @@ def cleanup_orphaned_processes(project_path: str) -> None:
 # ManagedProcess
 # ============================================================
 
+JSONL_STABLE_SECS = 3.0  # JSONL mtime がこの秒数以上変化なし → 安定
+
+
 @dataclass
 class ManagedProcess:
     """セッションに紐づく常駐claudeプロセス"""
@@ -176,6 +218,9 @@ class ManagedProcess:
     model: str = ""
     project_path: str = ""
     last_used: float = field(default_factory=time.time)
+    message_sent_at: float = 0.0    # 最後にメッセージを送信した時刻（0=未送信）
+    last_seen_jsonl_mtime: float = 0.0  # 最後に観測したJSONL mtime
+    last_mtime_change_at: float = 0.0   # JSONL mtime が最後に変化した時刻
     _loop: asyncio.AbstractEventLoop | None = None
 
     @property
@@ -194,9 +239,17 @@ class ManagedProcess:
                         continue
                     try:
                         data = json.loads(line)
+                        etype = data.get("type", "?")
+                        print(f"[READER] event={etype} sid={self.session_id[:8]}", flush=True)
                         loop.call_soon_threadsafe(self.queue.put_nowait, data)
                     except json.JSONDecodeError:
-                        pass
+                        print(f"[READER] JSON parse error: {line[:80]}", flush=True)
+            except Exception as e:
+                print(f"[READER] exception: {e}", flush=True)
+            # stdout が切れた = プロセスとの通信不能 → killしてプールから除去
+            print(f"[READER] stdout切断 sid={self.session_id[:8]} pid={self.proc.pid}", flush=True)
+            try:
+                self.proc.terminate()
             except Exception:
                 pass
             _remove_pid_file(self.project_path, self.session_id)
@@ -213,7 +266,13 @@ class ManagedProcess:
         }, ensure_ascii=False)
         self.proc.stdin.write((msg + "\n").encode("utf-8"))
         self.proc.stdin.flush()
-        self.last_used = time.time()
+        now = time.time()
+        self.last_used = now
+        self.message_sent_at = now
+        # JSONL安定性トラッキングをリセット（前のメッセージの状態を引き継がないため）
+        self.last_seen_jsonl_mtime = 0.0
+        self.last_mtime_change_at = 0.0
+        print(f"[DEBUG] message_sent sid={self.session_id} pid={self.proc.pid}", flush=True)
 
     def kill(self) -> None:
         """プロセスを終了する"""
@@ -353,21 +412,30 @@ class CLIBridge:
 
             mp.send_message(prompt)
 
+            last_event_type = None
+            exit_reason = "unknown"
             try:
                 while True:
                     try:
-                        event = await asyncio.wait_for(mp.queue.get(), timeout=300)
+                        # 15秒待ってイベントが来なければ _ping を yield して接続を維持する
+                        # （event_stream側でwait_forを使うとジェネレータが破壊されるためここで管理）
+                        event = await asyncio.wait_for(mp.queue.get(), timeout=15)
                     except asyncio.TimeoutError:
-                        logger.warning(f"タイムアウト: {key}")
-                        break
+                        yield {"type": "_ping"}
+                        continue
 
-                    if event.get("type") == "_process_exit":
+                    etype = event.get("type")
+                    last_event_type = etype
+
+                    if etype == "_process_exit":
+                        mp.message_sent_at = 0.0
+                        exit_reason = "process_exit"
                         async with self._pool_lock:
                             self._pool.pop(key, None)
                         break
 
-                    # resultイベントでsession_idを更新
-                    if event.get("type") == "result":
+                    # resultイベントでsession_idを更新（ストリーム終端として使用）
+                    if etype == "result":
                         new_sid = event.get("session_id", "")
                         if new_sid and not mp.session_id:
                             mp.session_id = new_sid
@@ -381,10 +449,13 @@ class CLIBridge:
 
                     yield event
 
-                    if event.get("type") == "result":
+                    # resultはHTTPストリーム終端として使う（推論完了の判断はしない）
+                    if etype == "result":
+                        exit_reason = "result"
+                        print(f"[DEBUG] result event sid={mp.session_id} pid={mp.proc.pid}", flush=True)
                         break
             finally:
-                pass
+                print(f"[RUN_STREAM] 終了 reason={exit_reason} last_event={last_event_type} sid={mp.session_id[:8] if mp.session_id else '?'} pid={mp.proc.pid}", flush=True)
 
     async def _cleanup_loop(self) -> None:
         """アイドルプロセスを定期的に終了する"""
@@ -429,19 +500,62 @@ class CLIBridge:
 
     def inferring_session_ids(self, project_path: str) -> list[str]:
         """推論中のセッションIDを返す。
-        プロセスプール内のプロセスと、PIDファイルで追跡中の孤児プロセスの両方を検査する。"""
+        プロセスプール内のプロセスと、PIDファイルで追跡中の孤児プロセスの両方を検査する。
+
+        ロジック表:
+        | 送信済 | TCP接続 | JSONL更新(送信後) | JSONL末尾  | JSONL安定(3秒) | 判定   |
+        |--------|---------|-----------------|-----------|---------------|--------|
+        | No     | -       | -               | -         | -             | 待機   |
+        | Yes    | 切れ    | -               | -         | -             | 完了   |
+        | Yes    | 接続中  | No              | -         | -             | 推論中 |
+        | Yes    | 接続中  | Yes             | user      | -             | 推論中 |
+        | Yes    | 接続中  | Yes             | assistant | No            | 推論中 |
+        | Yes    | 接続中  | Yes             | assistant | Yes           | 完了   |
+        """
         prefix = f"{project_path}::"
         result = []
         pool_sids = set()
+        now = time.time()
 
         # 1. プロセスプール内のプロセスを検査
         for key, mp in self._pool.items():
-            if key.startswith(prefix) and mp.alive:
-                sid = key[len(prefix):]
-                if not sid.startswith("new-"):
-                    pool_sids.add(sid)
-                    if _has_api_connection(mp.proc.pid):
-                        result.append(sid)
+            if not key.startswith(prefix) or not mp.alive:
+                continue
+            sid = key[len(prefix):]
+            if sid.startswith("new-"):
+                continue
+            pool_sids.add(sid)
+
+            # 送信済みでなければ待機中（推論中ではない）
+            if mp.message_sent_at == 0.0:
+                continue
+
+            last_role, jsonl_mtime = _jsonl_info(project_path, sid)
+
+            # JSONL安定性トラッキング更新
+            if jsonl_mtime > 0 and jsonl_mtime != mp.last_seen_jsonl_mtime:
+                mp.last_seen_jsonl_mtime = jsonl_mtime
+                mp.last_mtime_change_at = now
+
+            has_conn = _has_api_connection(mp.proc.pid)
+            jsonl_updated = jsonl_mtime > mp.message_sent_at
+            jsonl_stable = (mp.last_mtime_change_at > 0
+                            and (now - mp.last_mtime_change_at) >= JSONL_STABLE_SECS)
+
+            # 完了判定
+            if not has_conn:
+                # TCP切れ → 完了確定
+                mp.message_sent_at = 0.0
+                print(f"[DEBUG] 完了(TCP切れ) sid={sid[:8]}", flush=True)
+                continue
+            if jsonl_updated and last_role == "assistant" and jsonl_stable:
+                # JSONL末尾=assistant かつ 安定 → 完了
+                mp.message_sent_at = 0.0
+                print(f"[DEBUG] 完了(JSONL安定) sid={sid[:8]}", flush=True)
+                continue
+
+            # 上記以外 → 推論中
+            result.append(sid)
 
         # 2. PID ファイルから孤児プロセスを検査
         d = Path(project_path) / ".kobito" / "alive"
@@ -453,10 +567,12 @@ class CLIBridge:
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
                     os.kill(pid, 0)  # 生存確認
-                    if _has_api_connection(pid):
+                    has_conn = _has_api_connection(pid)
+                    last_role, _ = _jsonl_info(project_path, sid)
+                    if has_conn and last_role != "assistant":
                         result.append(sid)
                     else:
-                        # 推論終了済みの孤児 → kill してクリーンアップ
+                        # TCP切れ or JSONL=assistant → 推論終了済みの孤児 → kill してクリーンアップ
                         try:
                             psutil.Process(pid).terminate()
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -469,6 +585,89 @@ class CLIBridge:
                         pid_file.unlink(missing_ok=True)
                     except Exception:
                         pass
+
+        return result
+
+    def process_debug_info(self, project_path: str) -> list[dict]:
+        """デバッグ用: プロセスプールとPIDファイルの詳細情報を返す"""
+        prefix = f"{project_path}::"
+        result = []
+        pool_sids = set()
+        now = time.time()
+
+        # 1. プロセスプール内
+        for key, mp in self._pool.items():
+            if key.startswith(prefix):
+                sid = key[len(prefix):]
+                pool_sids.add(sid)
+                pid = mp.proc.pid
+                alive = mp.alive
+                has_conn = _has_api_connection(pid) if alive else False
+                last_role, jsonl_mtime = _jsonl_info(project_path, sid) if not sid.startswith("new-") else (None, 0.0)
+                pending = alive and mp.message_sent_at > 0
+                jsonl_updated = jsonl_mtime > mp.message_sent_at if pending else False
+                jsonl_stable = (mp.last_mtime_change_at > 0
+                                and (now - mp.last_mtime_change_at) >= JSONL_STABLE_SECS)
+                jsonl_stable_secs = round(now - mp.last_mtime_change_at, 1) if mp.last_mtime_change_at > 0 else None
+                # inferring に合わせてロジック表を再現（参照用）
+                if not pending:
+                    inferring = False
+                elif not has_conn:
+                    inferring = False
+                elif not jsonl_updated:
+                    inferring = True
+                elif last_role == "user":
+                    inferring = True
+                elif last_role == "assistant" and not jsonl_stable:
+                    inferring = True
+                else:
+                    inferring = False
+                result.append({
+                    "session_id": sid,
+                    "pid": pid,
+                    "source": "pool",
+                    "alive": alive,
+                    "connected": has_conn,
+                    "pending": pending,
+                    "jsonl_last_role": last_role,
+                    "jsonl_updated": jsonl_updated,
+                    "jsonl_stable": jsonl_stable,
+                    "jsonl_stable_secs": jsonl_stable_secs,
+                    "inferring": inferring,
+                })
+
+        # 2. PIDファイル（孤児）
+        d = Path(project_path) / ".kobito" / "alive"
+        if d.exists():
+            for pid_file in d.glob("*.pid"):
+                sid = pid_file.stem
+                if sid in pool_sids:
+                    continue
+                try:
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                    try:
+                        os.kill(pid, 0)
+                        alive = True
+                    except OSError:
+                        alive = False
+                    has_conn = _has_api_connection(pid) if alive else False
+                    last_role, _ = _jsonl_info(project_path, sid)
+                    inferring = alive and last_role != "assistant"
+                    result.append({
+                        "session_id": sid,
+                        "pid": pid,
+                        "source": "pidfile",
+                        "alive": alive,
+                        "connected": has_conn,
+                        "pending": None,
+                        "jsonl_last_role": last_role,
+                        "jsonl_updated": None,
+                        "jsonl_stable": None,
+                        "jsonl_stable_secs": None,
+                        "inferring": inferring,
+                    })
+                except (ValueError, Exception):
+                    pass
 
         return result
 
