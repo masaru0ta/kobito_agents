@@ -1047,7 +1047,10 @@ async function loadTasks() {
     taskExecutionOrder = data.order || [];
     renderTaskList();
     if (currentTaskId && tasksCache[currentTaskId]) {
-      renderTaskDetail(currentTaskId);
+      // 編集中（textarea表示中）は再レンダリングしない
+      if (!document.getElementById('task-edit-textarea')) {
+        renderTaskDetail(currentTaskId);
+      }
     }
   } catch (e) {
     console.error('タスク読み込みエラー', e);
