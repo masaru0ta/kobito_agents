@@ -687,6 +687,7 @@ body {
 .file-entry { padding: 10px 12px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s; margin-bottom: 2px; user-select: none; }
 .file-entry:hover { background: var(--bg-hover); }
 .file-entry.file-json .file-entry-icon { color: #f0b429; }
+.file-entry.file-code .file-entry-icon { color: #b392f0; }
 .file-entry.file-other { cursor: default; opacity: 0.55; }
 .file-entry-row1 { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
 .file-entry-icon { font-size: 13px; flex-shrink: 0; }

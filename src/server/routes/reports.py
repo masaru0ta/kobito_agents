@@ -92,6 +92,11 @@ def list_dir(
                         "is_md": is_md,
                         "is_image": suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"},
                         "is_json": suffix == ".json",
+                        "is_code": suffix in {
+                            ".py", ".js", ".ts", ".jsx", ".tsx", ".css",
+                            ".sh", ".bash", ".yaml", ".yml", ".toml", ".txt",
+                            ".go", ".rs", ".java", ".cpp", ".c", ".h", ".rb", ".php",
+                        },
                         "preview": preview,
                     })
                 except OSError:
@@ -123,6 +128,11 @@ def get_file(
     suffix = target.suffix.lower()
     if suffix in {".html", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
         return FileResponse(target)
-    if suffix in {".md", ".json"}:
+    _TEXT_SUFFIXES = {
+        ".md", ".json", ".py", ".js", ".ts", ".jsx", ".tsx", ".css",
+        ".sh", ".bash", ".yaml", ".yml", ".toml", ".txt",
+        ".go", ".rs", ".java", ".cpp", ".c", ".h", ".rb", ".php",
+    }
+    if suffix in _TEXT_SUFFIXES:
         return PlainTextResponse(target.read_text(encoding="utf-8", errors="replace"))
     raise HTTPException(status_code=400, detail="プレビュー非対応のファイル形式")

@@ -965,10 +965,11 @@ function renderFileDirEntries(data) {
       const isMd = f.is_md;
       const isImage = f.is_image;
       const isJson = f.is_json;
+      const isCode = f.is_code;
       const ext = f.name.split('.').pop().toLowerCase();
       const isHtml = ext === 'html';
-      const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : isJson ? 'file-json' : 'file-other';
-      const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : isJson ? '{ }' : '🔒';
+      const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : isJson ? 'file-json' : isCode ? 'file-code' : 'file-other';
+      const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : isJson ? '{ }' : isCode ? '</>' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
       const meta = `${sizeStr} · ${fmt(f.mtime)} 更新`;
       const row2 = f.preview
@@ -993,6 +994,9 @@ function renderFileDirEntries(data) {
   });
   entryList.querySelectorAll('.file-entry.file-json').forEach(el => {
     el.addEventListener('click', () => openJsonFile(el.dataset.path));
+  });
+  entryList.querySelectorAll('.file-entry.file-code').forEach(el => {
+    el.addEventListener('click', () => openCodeFile(el.dataset.path));
   });
   entryList.querySelectorAll('.file-entry.file-html').forEach(el => {
     el.addEventListener('click', () => {
@@ -1080,6 +1084,40 @@ async function openJsonFile(filepath) {
     const encoded = pathParts.map(encodeURIComponent).join('/');
     const text = await fetch(`${API}/agents/${currentAgentId}/reports/${encoded}`).then(r => r.text());
     bodyEl.innerHTML = `<pre class="json-viewer">${highlightJson(text)}</pre>`;
+  } catch (e) {
+    bodyEl.innerHTML = '<div style="color:var(--danger);">読み込みエラー</div>';
+  }
+}
+
+async function openCodeFile(filepath) {
+  const detailPane = document.getElementById('report-detail-pane');
+  const listView = document.getElementById('report-list-view');
+  const titleEl = document.getElementById('report-detail-title');
+  const bodyEl = document.getElementById('report-detail-body');
+
+  const name = filepath.split('/').pop();
+  titleEl.textContent = name;
+  bodyEl.innerHTML = '<div style="color:var(--text-muted);">読み込み中...</div>';
+  listView.style.display = 'none';
+  detailPane.style.display = 'flex';
+
+  try {
+    const pathParts = filepath.split('/');
+    const encoded = pathParts.map(encodeURIComponent).join('/');
+    const text = await fetch(`${API}/agents/${currentAgentId}/reports/${encoded}`).then(r => r.text());
+    if (typeof hljs !== 'undefined') {
+      const ext = name.split('.').pop().toLowerCase();
+      const lang = { py: 'python', js: 'javascript', ts: 'typescript', jsx: 'javascript',
+        tsx: 'typescript', sh: 'bash', bash: 'bash', yml: 'yaml', yaml: 'yaml',
+        toml: 'ini', rs: 'rust', go: 'go', rb: 'ruby', php: 'php',
+        cpp: 'cpp', c: 'c', h: 'c', java: 'java', css: 'css', txt: 'plaintext',
+      }[ext] || 'plaintext';
+      const highlighted = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+      bodyEl.innerHTML = `<pre class="hljs" style="font-size:12px; line-height:1.6; border-radius:6px; padding:14px; overflow-x:auto;">${highlighted}</pre>`;
+    } else {
+      const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      bodyEl.innerHTML = `<pre style="font-size:12px; line-height:1.6;">${escaped}</pre>`;
+    }
   } catch (e) {
     bodyEl.innerHTML = '<div style="color:var(--danger);">読み込みエラー</div>';
   }
