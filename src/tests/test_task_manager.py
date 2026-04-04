@@ -1,11 +1,10 @@
 """TaskManager単体テスト"""
 
-import json
 from pathlib import Path
 
 import pytest
 
-from server.task_manager import TaskManager, _parse_frontmatter, TaskMeta
+from server.task_manager import TaskManager, _parse_frontmatter
 
 
 # ================================================================

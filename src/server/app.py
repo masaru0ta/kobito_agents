@@ -8,7 +8,6 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +18,8 @@ from server.cli_bridge import CLIBridge, cleanup_orphaned_processes
 from server.routes.agents import router as agents_router
 from server.routes.chat import router as chat_router
 from server.routes.tasks import router as tasks_router
+from server.routes.scheduler import router as scheduler_router
+from server.scheduler import Scheduler
 
 
 def resolve_project_root() -> Path:
@@ -43,6 +44,7 @@ def create_app(
     if cli_bridge is None:
         cli_bridge = CLIBridge()
 
+    scheduler = Scheduler(config_manager=config_manager, cli_bridge=cli_bridge)
     startup_id = str(uuid.uuid4())
 
     @asynccontextmanager
@@ -51,8 +53,11 @@ def create_app(
         # 起動時: 前回サーバーの孤児プロセスをクリーンアップ
         for agent in config_manager.list_agents():
             cleanup_orphaned_processes(agent.path)
+        # スケジューラー タイマーループ開始
+        scheduler.start()
         yield
         print(f"[SERVER] 終了 startup_id={startup_id}", flush=True)
+        await scheduler.stop()
         await cli_bridge.shutdown()
 
     app = FastAPI(title="kobito_agents", lifespan=lifespan)
@@ -60,6 +65,7 @@ def create_app(
     app.state.config_manager = config_manager
     app.state.session_reader = session_reader
     app.state.cli_bridge = cli_bridge
+    app.state.scheduler = scheduler
     app.state.startup_id = startup_id
 
     @app.post("/api/restart")
@@ -72,6 +78,7 @@ def create_app(
     app.include_router(agents_router)
     app.include_router(chat_router)
     app.include_router(tasks_router)
+    app.include_router(scheduler_router)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

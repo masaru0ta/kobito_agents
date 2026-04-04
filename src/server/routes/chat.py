@@ -1,6 +1,7 @@
 """チャット関連API"""
 
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -9,9 +10,24 @@ from pydantic import BaseModel
 from server.config import AgentNotFoundError, ConfigManager
 from server.session_reader import SessionReader
 from server.cli_bridge import CLIBridge, parse_stream_event, resolve_model
+from server.task_manager import TaskManager
+from server.task_context import build_task_context
 from server.routes.deps import get_config_manager, get_session_reader, get_cli_bridge, get_startup_id
 
 router = APIRouter(prefix="/api/agents/{agent_id}", tags=["chat"])
+
+
+def _update_session_meta(agent_path: str, session_id: str, updates: dict) -> dict:
+    """セッションメタデータを読み込み、更新して書き戻す。更新後のメタデータを返す。"""
+    meta_dir = Path(agent_path) / ".kobito" / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = meta_dir / f"{session_id}.json"
+    meta = {}
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.update(updates)
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return meta
 
 
 class CLILaunchRequest(BaseModel):
@@ -73,8 +89,6 @@ async def send_chat(
     # タスクコンテキスト注入
     prompt = body.message
     if body.task_id:
-        from server.task_manager import TaskManager
-        from server.task_context import build_task_context
         tm = TaskManager(agent.path)
         try:
             task = tm.get_task(body.task_id)
@@ -143,15 +157,7 @@ def update_session_title(
         agent = config.get_agent(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    from pathlib import Path
-    meta_dir = Path(agent.path) / ".kobito" / "meta"
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = meta_dir / f"{session_id}.json"
-    meta = {}
-    if meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta["title"] = body.title
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _update_session_meta(agent.path, session_id, {"title": body.title})
     return {"status": "ok", "title": body.title}
 
 
@@ -170,15 +176,7 @@ def update_session_model_tier(
         agent = config.get_agent(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    from pathlib import Path
-    meta_dir = Path(agent.path) / ".kobito" / "meta"
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = meta_dir / f"{session_id}.json"
-    meta = {}
-    if meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta["model_tier"] = body.model_tier
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _update_session_meta(agent.path, session_id, {"model_tier": body.model_tier})
     return {"status": "ok"}
 
 
@@ -217,16 +215,7 @@ def hide_session(
         agent = config.get_agent(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    import json
-    from pathlib import Path
-    meta_dir = Path(agent.path) / ".kobito" / "meta"
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = meta_dir / f"{session_id}.json"
-    meta = {}
-    if meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta["hidden"] = True
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _update_session_meta(agent.path, session_id, {"hidden": True})
     return {"status": "ok"}
 
 

@@ -1,6 +1,5 @@
 """タスクコンテキスト注入のテスト"""
 
-from pathlib import Path
 
 import pytest
 

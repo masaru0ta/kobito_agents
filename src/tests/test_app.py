@@ -1,9 +1,7 @@
 """app.pyのテスト — デフォルトパス解決とアプリ起動"""
 
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 
 class TestCreateAppDefaults:

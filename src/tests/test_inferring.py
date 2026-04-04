@@ -1,7 +1,7 @@
 """推論中判定のテスト
 
 対象:
-- PIDファイル管理 (_alive_dir, _write_pid_file, _remove_pid_file)
+- PIDファイル管理 (_pid_dir, _write_pid_file, _remove_pid_file)
 - TCP接続検査 (_has_api_connection)
 - 孤児プロセスクリーンアップ (cleanup_orphaned_processes)
 - CLIBridge.inferring_session_ids()
@@ -13,14 +13,14 @@ import asyncio
 import os
 from collections import namedtuple
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from server.cli_bridge import (
     CLIBridge,
     ManagedProcess,
-    _alive_dir,
+    _pid_dir,
     _has_api_connection,
     _remove_pid_file,
     _write_pid_file,
@@ -79,20 +79,20 @@ ConnInfo = namedtuple("ConnInfo", ["raddr", "status"])
 # ============================================================
 
 class TestAliveDir:
-    """_alive_dir: PIDファイルディレクトリの作成"""
+    """_pid_dir: PIDファイルディレクトリの作成"""
 
     def test_ディレクトリが作成される(self, tmp_path):
         project = str(tmp_path / "project")
         os.makedirs(project)
-        d = _alive_dir(project)
+        d = _pid_dir(project)
         assert d.exists()
         assert d == Path(project) / ".kobito" / "alive"
 
     def test_既に存在しても例外にならない(self, tmp_path):
         project = str(tmp_path / "project")
         os.makedirs(project)
-        _alive_dir(project)
-        d = _alive_dir(project)  # 2回目
+        _pid_dir(project)
+        d = _pid_dir(project)  # 2回目
         assert d.exists()
 
 
@@ -186,7 +186,6 @@ class TestHasApiConnection:
             assert _has_api_connection(1000) is False
 
     def test_子プロセスの接続も検査する(self):
-        import psutil as _psutil
 
         mock_parent = MagicMock()
         mock_parent.net_connections.return_value = []

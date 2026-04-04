@@ -1,9 +1,7 @@
 """SessionReader (ClaudeSessionReader) のテスト"""
 
 import json
-from datetime import datetime, timezone
 
-import pytest
 
 from tests.conftest import make_session_jsonl
 

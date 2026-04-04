@@ -45,6 +45,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     showToast('再起動がタイムアウトしました');
   });
+
+  // スケジューラートグルボタン
+  initScheduler();
 });
 
 // ============================================================
@@ -176,12 +179,14 @@ function syncInferringIndicators(prev, current) {
   // 推論終了したセッション → インジケータ除去
   prev.forEach(sid => {
     if (!current.has(sid)) {
+      // ストリームがまだアクティブなら除去しない（バックエンドが一時的に推論中を返さない場合の誤除去防止）
+      if (activeStreams.has(sid)) return;
       const container = getSessionContainer(sid);
       const ind = container.querySelector('.thinking-indicator');
       if (ind) { ind._stopTimer?.(); ind.remove(); }
       const el = document.querySelector(`.conversation-item[data-session-id="${sid}"] .conv-status`);
       if (el) el.remove();
-      if (sid === currentSessionId && !activeStreams.has(sid)) loadSessionHistory(sid, true);
+      if (sid === currentSessionId) loadSessionHistory(sid, true);
     }
   });
   // 推論開始を検知（バックエンドで検知したがフロントに反映されていない）→ インジケータ追加
@@ -513,6 +518,21 @@ async function startWorkSession(taskId, message) {
   const task = tasksCache[taskId];
   if (!task) return;
 
+  // 既存の作業セッションがある場合は最新のものを再利用
+  if (task.sessions && task.sessions.length > 0) {
+    const lastSid = task.sessions[task.sessions.length - 1];
+    document.getElementById('chat-pane').classList.remove('hidden');
+    switchTab('chat');
+    await selectSession(lastSid);
+    const input = document.getElementById('chat-input');
+    input.value = message;
+    await sendMessage();
+    return;
+  }
+
+  // 新規セッション作成
+  const prevSessionIds = new Set(sessions.map(s => s.session_id));
+
   currentSessionId = null;
   clearChat();
   activateSessionContainer(null);
@@ -521,15 +541,24 @@ async function startWorkSession(taskId, message) {
 
   const input = document.getElementById('chat-input');
   input.value = message;
-  await sendMessage({ task_id: taskId, task_mode: 'work' });
+  await sendMessage();
 
-  if (currentSessionId) {
-    await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: currentSessionId }),
-    });
-  }
+  await loadSessions();
+  const newSession = sessions.find(s => !prevSessionIds.has(s.session_id));
+  if (!newSession) return;
+
+  const sid = newSession.session_id;
+  await fetch(`${API}/agents/${currentAgentId}/sessions/${sid}/title`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: `${task.title} の作業` }),
+  });
+  await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sid }),
+  });
+  await loadTasks();
 }
 
 async function sendMessage(opts = {}) {
@@ -831,6 +860,40 @@ async function loadSettingsData() {
   const promptResp = await fetch(`${API}/agents/${currentAgentId}/system-prompt`);
   const promptData = await promptResp.json();
   document.querySelector('[data-field="system-prompt"]').value = promptData.content || '';
+}
+
+async function loadSchedulerLogs() {
+  const resp = await fetch(`${API}/scheduler/logs`);
+  if (!resp.ok) return;
+  const logs = await resp.json();
+  const el = document.getElementById('scheduler-log-list');
+  if (!el) return;
+  if (logs.length === 0) {
+    el.innerHTML = '<div class="scheduler-log-empty">実行履歴なし</div>';
+    return;
+  }
+  el.innerHTML = logs.map(log => {
+    const dt = new Date(log.timestamp);
+    const dateStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    const progress = log.total_after > 0 ? `${log.checked_after}/${log.total_after}` : '—';
+    const changed = log.progress_changed
+      ? `<span class="slog-changed">+${log.checked_after - log.checked_before}</span>`
+      : '<span class="slog-unchanged">変化なし</span>';
+    const sessionShort = log.session_id ? log.session_id.slice(0, 8) : '—';
+    const errHtml = log.error ? `<div class="slog-error">${escapeHtml(log.error)}</div>` : '';
+    return `<div class="scheduler-log-entry${log.error ? ' slog-has-error' : ''}">
+      <div class="slog-header">
+        <span class="slog-time">${dateStr}</span>
+        <span class="slog-title">${escapeHtml(log.task_title || log.task_id)}</span>
+        ${changed}
+      </div>
+      <div class="slog-meta">
+        <span class="slog-session">session: ${sessionShort}</span>
+        <span class="slog-progress">進捗: ${progress}</span>
+      </div>
+      ${errHtml}
+    </div>`;
+  }).join('');
 }
 
 function isMobile() {
@@ -1225,9 +1288,11 @@ function backToTaskList() {
   renderTaskList();
 }
 
-function renderTaskDetail(taskId) {
+async function renderTaskDetail(taskId) {
   const task = tasksCache[taskId];
   if (!task) return;
+
+  if (sessions.length === 0) await loadSessions();
 
   const headerEl = document.getElementById('task-detail-header');
   let approvalHtml = '';
@@ -1307,12 +1372,22 @@ function renderTaskDetail(taskId) {
         const s = sessions.find(s => s.session_id === task.talk_session_id);
         return s ? `<div class="task-meta-item"><span class="task-meta-label">相談セッション:</span><a class="task-session-link" data-session-id="${task.talk_session_id}">${escapeHtml(s.title || s.session_id)}</a></div>` : '';
       })() : ''}
+      ${task.sessions && task.sessions.length > 0 ? `
+        <div class="task-meta-item task-meta-item--col">
+          <span class="task-meta-label">作業セッション:</span>
+          ${task.sessions.map(sid => {
+            const s = sessions.find(s => s.session_id === sid);
+            return s ? `<a class="task-session-link" data-session-id="${sid}">${escapeHtml(s.title || sid)}</a>` : '';
+          }).filter(Boolean).join('')}
+        </div>` : ''}
     </div>`;
 
-  bodyEl.querySelector('.task-session-link')?.addEventListener('click', async (e) => {
-    const sid = e.currentTarget.dataset.sessionId;
-    document.getElementById('chat-pane').classList.remove('hidden');
-    await selectSession(sid);
+  bodyEl.querySelectorAll('.task-session-link').forEach(el => {
+    el.addEventListener('click', async (e) => {
+      const sid = e.currentTarget.dataset.sessionId;
+      document.getElementById('chat-pane').classList.remove('hidden');
+      await selectSession(sid);
+    });
   });
 
   bodyEl.querySelector(`[data-approve="${taskId}"]`)?.addEventListener('click', async () => {
@@ -1434,4 +1509,66 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// ============================================================
+// スケジューラー
+// ============================================================
+
+function openSchedulerLog() {
+  const pane = document.getElementById('scheduler-log-pane');
+  pane.style.display = 'flex';
+  loadSchedulerLogs();
+}
+
+function closeSchedulerLog() {
+  document.getElementById('scheduler-log-pane').style.display = 'none';
+}
+
+function initScheduler() {
+  document.getElementById('scheduler-log-btn').addEventListener('click', openSchedulerLog);
+  document.getElementById('scheduler-log-back-btn').addEventListener('click', closeSchedulerLog);
+
+  const btn = document.getElementById('scheduler-toggle-btn');
+  btn.addEventListener('click', async () => {
+    try {
+      const resp = await fetch(`${API}/scheduler/toggle`, { method: 'POST' });
+      if (resp.ok) {
+        updateSchedulerUI(await resp.json());
+      }
+    } catch (e) {
+      console.error('[SCHEDULER] toggle error:', e);
+    }
+  });
+
+  // 初回取得 + 30秒ポーリング
+  fetchSchedulerStatus();
+  setInterval(fetchSchedulerStatus, 30000);
+}
+
+async function fetchSchedulerStatus() {
+  try {
+    const resp = await fetch(`${API}/scheduler/status`);
+    if (resp.ok) {
+      updateSchedulerUI(await resp.json());
+    }
+  } catch (_) {}
+}
+
+function updateSchedulerUI(data) {
+  const btn = document.getElementById('scheduler-toggle-btn');
+  const indicator = document.getElementById('scheduler-indicator');
+  const label = document.getElementById('scheduler-label');
+
+  if (data.enabled) {
+    btn.classList.add('on');
+    indicator.classList.remove('off');
+    indicator.classList.add('on');
+    label.textContent = 'ON';
+  } else {
+    btn.classList.remove('on');
+    indicator.classList.remove('on');
+    indicator.classList.add('off');
+    label.textContent = 'OFF';
+  }
 }

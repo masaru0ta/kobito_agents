@@ -19,5 +19,9 @@ def get_cli_bridge(request: Request) -> CLIBridge:
     return request.app.state.cli_bridge
 
 
+def get_scheduler(request: Request):
+    return request.app.state.scheduler
+
+
 def get_startup_id(request: Request) -> str:
     return request.app.state.startup_id

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import random
-import string
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -35,19 +33,35 @@ class Task(BaseModel):
     body: str = ""
 
 
+def _infer_phase(body: str, sessions: list[str], forced_phase: str | None) -> str:
+    """チェックボックス状態とセッション有無からフェーズを導出する。
+    force_done で forced_phase="done" が渡された場合はそれを優先する。
+    """
+    if forced_phase == "done":
+        return "done"
+    checked = len(re.findall(r"- \[x\]", body, re.IGNORECASE))
+    unchecked = len(re.findall(r"- \[ \]", body))
+    total = checked + unchecked
+    if total > 0 and unchecked == 0:
+        return "done"
+    if sessions or checked > 0:
+        return "doing"
+    return "draft"
+
+
 def _parse_frontmatter(content: str) -> tuple[dict, str]:
     """---で囲まれたfrontmatterをパースする"""
     m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)", content, re.DOTALL)
     if not m:
         return {}, content.strip()
 
-    fm: dict = {}
+    frontmatter: dict = {}
     for line in m.group(1).splitlines():
         if ":" in line:
             key, _, val = line.partition(":")
-            fm[key.strip()] = val.strip()
+            frontmatter[key.strip()] = val.strip()
 
-    return fm, m.group(2).strip()
+    return frontmatter, m.group(2).strip()
 
 
 class TaskManager:
@@ -101,19 +115,27 @@ class TaskManager:
             content = md_file.read_text(encoding="utf-8")
         except OSError:
             return None
-        fm, body = _parse_frontmatter(content)
+        frontmatter, body = _parse_frontmatter(content)
         task_id = md_file.stem
         meta = self._read_meta(task_id)
         # メタデータが存在しない場合は自動生成
         if not (self._meta_dir / f"{task_id}.json").exists():
             self._write_meta(meta)
+        # ファイル作成日時を取得
+        stat = md_file.stat()
+        ctime = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat()
+
+        # force_done で "done" が書かれている場合のみ尊重、それ以外は動的導出
+        forced_phase = frontmatter.get("phase") if frontmatter.get("phase") == "done" else None
+        phase = _infer_phase(body, meta.sessions, forced_phase)
+
         return Task(
             task_id=task_id,
-            title=fm.get("title", task_id),
-            agent=fm.get("agent", "system"),
-            phase=fm.get("phase", "draft"),
-            created=fm.get("created", ""),
-            schedule=fm.get("schedule") or None,
+            title=frontmatter.get("title", task_id),
+            agent=frontmatter.get("agent", "system"),
+            phase=phase,
+            created=ctime,
+            schedule=frontmatter.get("schedule") or None,
             approval=meta.approval,
             approved_at=meta.approved_at,
             sessions=meta.sessions,

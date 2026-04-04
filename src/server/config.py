@@ -27,6 +27,7 @@ class ConfigManager:
         self._data_dir = Path(data_dir)
         self._system_path = system_path
         self._agents_file = self._data_dir / "agents.json"
+        self._settings_file = self._data_dir / "settings.json"
         self._ensure_system_agent()
 
     def _ensure_system_agent(self) -> None:
@@ -101,3 +102,18 @@ class ConfigManager:
     def update_system_prompt(self, agent_id: str, content: str) -> None:
         agent = self.get_agent(agent_id)
         (Path(agent.path) / "CLAUDE.md").write_text(content, encoding="utf-8")
+
+    def get_setting(self, key: str, default=None):
+        if not self._settings_file.exists():
+            return default
+        data = json.loads(self._settings_file.read_text(encoding="utf-8"))
+        return data.get(key, default)
+
+    def set_setting(self, key: str, value) -> None:
+        data = {}
+        if self._settings_file.exists():
+            data = json.loads(self._settings_file.read_text(encoding="utf-8"))
+        data[key] = value
+        self._settings_file.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )

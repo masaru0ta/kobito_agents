@@ -123,18 +123,18 @@ def _jsonl_info(project_path: str, session_id: str) -> tuple[str | None, float]:
 # PID ファイル管理
 # ============================================================
 
-def _alive_dir(project_path: str) -> Path:
+def _pid_dir(project_path: str) -> Path:
     """PID ファイル置き場: {project}/.kobito/alive/"""
-    d = Path(project_path) / ".kobito" / "alive"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    pid_dir = Path(project_path) / ".kobito" / "alive"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    return pid_dir
 
 
 def _write_pid_file(project_path: str, session_id: str, pid: int) -> None:
     """プロセス起動時に PID を記録する"""
     if not session_id or session_id.startswith("new-"):
         return
-    path = _alive_dir(project_path) / f"{session_id}.pid"
+    path = _pid_dir(project_path) / f"{session_id}.pid"
     path.write_text(str(pid), encoding="utf-8")
 
 
@@ -142,7 +142,7 @@ def _remove_pid_file(project_path: str, session_id: str) -> None:
     """プロセス終了時に PID ファイルを削除する"""
     if not session_id:
         return
-    path = _alive_dir(project_path) / f"{session_id}.pid"
+    path = _pid_dir(project_path) / f"{session_id}.pid"
     try:
         path.unlink(missing_ok=True)
     except Exception:
@@ -175,10 +175,10 @@ def _has_api_connection(pid: int) -> bool:
 def cleanup_orphaned_processes(project_path: str) -> None:
     """サーバー起動時に呼ぶ。PID ファイルから孤児プロセスを検出し、
     推論が終わっているものは kill してクリーンアップする。"""
-    d = Path(project_path) / ".kobito" / "alive"
-    if not d.exists():
+    pid_dir = Path(project_path) / ".kobito" / "alive"
+    if not pid_dir.exists():
         return
-    for pid_file in d.glob("*.pid"):
+    for pid_file in pid_dir.glob("*.pid"):
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip())
             os.kill(pid, 0)  # 生存確認
@@ -558,9 +558,9 @@ class CLIBridge:
             result.append(sid)
 
         # 2. PID ファイルから孤児プロセスを検査
-        d = Path(project_path) / ".kobito" / "alive"
-        if d.exists():
-            for pid_file in d.glob("*.pid"):
+        pid_dir = Path(project_path) / ".kobito" / "alive"
+        if pid_dir.exists():
+            for pid_file in pid_dir.glob("*.pid"):
                 sid = pid_file.stem
                 if sid in pool_sids:
                     continue  # プール内で既に検査済み
@@ -604,13 +604,13 @@ class CLIBridge:
                 alive = mp.alive
                 has_conn = _has_api_connection(pid) if alive else False
                 last_role, jsonl_mtime = _jsonl_info(project_path, sid) if not sid.startswith("new-") else (None, 0.0)
-                pending = alive and mp.message_sent_at > 0
-                jsonl_updated = jsonl_mtime > mp.message_sent_at if pending else False
+                awaiting_response = alive and mp.message_sent_at > 0
+                jsonl_updated = jsonl_mtime > mp.message_sent_at if awaiting_response else False
                 jsonl_stable = (mp.last_mtime_change_at > 0
                                 and (now - mp.last_mtime_change_at) >= JSONL_STABLE_SECS)
                 jsonl_stable_secs = round(now - mp.last_mtime_change_at, 1) if mp.last_mtime_change_at > 0 else None
                 # inferring に合わせてロジック表を再現（参照用）
-                if not pending:
+                if not awaiting_response:
                     inferring = False
                 elif not has_conn:
                     inferring = False
@@ -628,7 +628,7 @@ class CLIBridge:
                     "source": "pool",
                     "alive": alive,
                     "connected": has_conn,
-                    "pending": pending,
+                    "awaiting_response": awaiting_response,
                     "jsonl_last_role": last_role,
                     "jsonl_updated": jsonl_updated,
                     "jsonl_stable": jsonl_stable,
@@ -637,9 +637,9 @@ class CLIBridge:
                 })
 
         # 2. PIDファイル（孤児）
-        d = Path(project_path) / ".kobito" / "alive"
-        if d.exists():
-            for pid_file in d.glob("*.pid"):
+        pid_dir = Path(project_path) / ".kobito" / "alive"
+        if pid_dir.exists():
+            for pid_file in pid_dir.glob("*.pid"):
                 sid = pid_file.stem
                 if sid in pool_sids:
                     continue
@@ -659,7 +659,7 @@ class CLIBridge:
                         "source": "pidfile",
                         "alive": alive,
                         "connected": has_conn,
-                        "pending": None,
+                        "awaiting_response": None,
                         "jsonl_last_role": last_role,
                         "jsonl_updated": None,
                         "jsonl_stable": None,

@@ -55,11 +55,11 @@ class ClaudeSessionReader(SessionReader):
 
     def get_dir_mtime(self, project_path: str) -> float:
         """セッションディレクトリ内のJSONLファイル群の最大更新時刻を返す"""
-        d = self._sessions_dir(project_path)
-        if not d.exists():
+        sessions_dir = self._sessions_dir(project_path)
+        if not sessions_dir.exists():
             return 0
         max_mtime = 0
-        for p in d.glob("*.jsonl"):
+        for p in sessions_dir.glob("*.jsonl"):
             mt = p.stat().st_mtime
             if mt > max_mtime:
                 max_mtime = mt

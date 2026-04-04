@@ -54,6 +54,12 @@ body {
 .process-debug-tag { font-size: 9px; padding: 0 3px; border-radius: 3px; background: var(--bg-hover); color: var(--text-secondary); flex-shrink: 0; }
 .restart-btn { width: 100%; padding: 10px; background: transparent; border: 1px dashed var(--border); border-radius: 6px; color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all 0.15s; }
 .restart-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-active); }
+.scheduler-toggle-btn { width: 100%; padding: 10px; margin-top: 6px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; justify-content: center; }
+.scheduler-toggle-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-active); }
+.scheduler-toggle-btn.on { border-color: #3fb950; color: #3fb950; }
+.scheduler-indicator { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.scheduler-indicator.off { background: var(--text-muted); }
+.scheduler-indicator.on { background: #3fb950; box-shadow: 0 0 6px #3fb95088; }
 .sidebar-section-label { padding: 12px 16px 6px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
 .agent-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
 .agent-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; cursor: pointer; transition: background 0.15s; border: 1px solid transparent; }
@@ -577,8 +583,10 @@ body {
 }
 
 .task-meta-item { display: flex; align-items: center; gap: 4px; }
+.task-meta-item--col { align-items: flex-start; flex-direction: column; gap: 2px; }
+.task-meta-item--col .task-meta-label { margin-bottom: 2px; }
 .task-meta-label { color: var(--text-muted); }
-.task-session-link { color: var(--accent); cursor: pointer; text-decoration: none; }
+.task-session-link { color: var(--accent); cursor: pointer; text-decoration: none; font-size: 12px; }
 .task-session-link:hover { text-decoration: underline; }
 
 /* タスクMDコンテンツ */
@@ -638,3 +646,17 @@ body {
 ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* スケジューラーログ */
+.scheduler-log-btn { width: 100%; padding: 8px; margin-top: 4px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: 12px; cursor: pointer; transition: all 0.15s; }
+.scheduler-log-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-active); }
+.scheduler-log-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+.scheduler-log-entry { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+.scheduler-log-entry.slog-has-error { border-color: #f85149; }
+.slog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.slog-time { color: var(--text-muted); flex-shrink: 0; }
+.slog-title { color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slog-changed { color: #3fb950; font-weight: 600; flex-shrink: 0; }
+.slog-unchanged { color: var(--text-muted); flex-shrink: 0; }
+.slog-meta { display: flex; gap: 12px; color: var(--text-muted); }
+.slog-error { color: #f85149; margin-top: 4px; word-break: break-all; }
