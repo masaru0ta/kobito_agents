@@ -835,6 +835,7 @@ function switchTab(tabName) {
     // セッション表示中はチャットペインをそのまま維持
     if (!currentSessionId) chatPane.classList.add('hidden');
   } else if (tabName === 'settings') {
+    settingsContent.classList.add('visible');
     chatPane.classList.add('hidden');
     settingsPane.classList.add('visible');
     loadSettingsData();
@@ -1145,9 +1146,11 @@ let taskExecutionOrder = []; // 承認済みタスクの実行順序
 async function loadTasks() {
   if (!currentAgentId) return;
   try {
-    const data = await fetch(`${API}/agents/${currentAgentId}/tasks`).then(r => r.json());
+    const resp = await fetch(`${API}/agents/${currentAgentId}/tasks`);
+    if (!resp.ok) return;
+    const data = await resp.json();
     tasksCache = {};
-    data.tasks.forEach(t => { tasksCache[t.task_id] = t; });
+    (data.tasks || []).forEach(t => { tasksCache[t.task_id] = t; });
     taskExecutionOrder = data.order || [];
     renderTaskList();
     if (currentTaskId && tasksCache[currentTaskId]) {
