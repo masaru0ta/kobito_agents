@@ -931,7 +931,7 @@ async function renderFileDir(dirPath) {
     dirs.forEach(d => {
       html += `<div class="file-entry dir" data-path="${escapeHtml(d.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(d.name)}</span></div>
-        <div class="file-entry-row2">フォルダ</div>
+        <div class="file-entry-meta">フォルダ</div>
       </div>`;
     });
     files.forEach(f => {
@@ -946,11 +946,11 @@ async function renderFileDir(dirPath) {
       const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
       const meta = `${sizeStr} · ${dateStr}`;
       const row2 = f.preview
-        ? `${escapeHtml(f.preview)} <span style="opacity:0.6;">— ${meta}</span>`
-        : meta;
+        ? `<div class="file-entry-preview">${escapeHtml(f.preview)}</div><div class="file-entry-meta">${meta}</div>`
+        : `<div class="file-entry-meta">${meta}</div>`;
       html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">${icon}</span><span class="file-entry-name">${escapeHtml(f.name)}</span></div>
-        <div class="file-entry-row2">${row2}</div>
+        ${row2}
       </div>`;
     });
     entryList.innerHTML = html;
