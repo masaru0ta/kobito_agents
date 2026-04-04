@@ -78,19 +78,31 @@ def list_dir(
                     if is_md or is_code:
                         try:
                             with entry.open(encoding="utf-8", errors="replace") as fh:
-                                first = True
+                                in_block_comment = False
+                                first_line = True
                                 for line in fh:
-                                    line = line.strip()
-                                    if not line:
+                                    raw = line.strip()
+                                    if not raw:
                                         continue
-                                    if first and line == "---":
-                                        first = False
+                                    # YAMLフロントマター区切り
+                                    if first_line and raw == "---":
+                                        first_line = False
                                         continue
-                                    # コメント記号・shebang・記号のみ行はスキップ
-                                    clean = line.lstrip("#!/*-").strip()
-                                    if clean:
-                                        preview = clean
-                                        break
+                                    first_line = False
+                                    # ブロックコメント開始 (/** or /*)
+                                    if raw.startswith("/*"):
+                                        in_block_comment = True
+                                    if in_block_comment:
+                                        if "*/" in raw:
+                                            in_block_comment = False
+                                        continue
+                                    # 行コメント・shebang・記号のみ行をスキップ
+                                    if raw.startswith(("//", "#!", "#", "*")):
+                                        continue
+                                    if raw in {"---", "===", "```"}:
+                                        continue
+                                    preview = raw
+                                    break
                         except OSError:
                             pass
                     files.append({
