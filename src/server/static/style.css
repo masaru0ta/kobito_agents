@@ -674,11 +674,21 @@ body {
 .slog-error { color: #f85149; margin-top: 4px; word-break: break-all; }
 
 /* レポート */
-.report-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 6px; cursor: pointer; transition: background 0.15s; }
-.report-item:hover { background: var(--bg-hover); }
-.report-item-name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.report-item-dir { color: var(--text-muted); font-size: 12px; }
-.report-item-date { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 8px; }
+/* ファイルブラウザ */
+.file-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 8px 10px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.file-breadcrumb-sep { margin: 0 2px; }
+.file-breadcrumb-item { cursor: pointer; color: var(--accent); padding: 2px 4px; border-radius: 3px; }
+.file-breadcrumb-item:hover { background: var(--bg-hover); }
+.file-breadcrumb-item.current { color: var(--text-primary); cursor: default; font-weight: 600; }
+.file-breadcrumb-item.current:hover { background: none; }
+.file-entry { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 5px; cursor: pointer; transition: background 0.12s; user-select: none; }
+.file-entry:hover { background: var(--bg-hover); }
+.file-entry.dir .file-entry-icon { color: #e8b84b; }
+.file-entry.file-md .file-entry-icon { color: #6b9cf7; }
+.file-entry.file-other { cursor: default; opacity: 0.55; }
+.file-entry-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+.file-entry-name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.file-entry-meta { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 4px; }
 #report-detail-body h1, #report-detail-body h2, #report-detail-body h3 { margin: 1em 0 0.5em; }
 #report-detail-body p { margin-bottom: 0.8em; }
 #report-detail-body pre { background: var(--bg-tertiary); padding: 10px; border-radius: 6px; overflow-x: auto; margin-bottom: 0.8em; }

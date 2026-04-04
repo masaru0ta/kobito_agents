@@ -99,7 +99,7 @@ async function selectAgent(agentId) {
   await loadTasks();
   // レポート詳細を閉じてレポート一覧を読み込む
   document.getElementById('report-detail-pane').style.display = 'none';
-  document.getElementById('report-list-view').style.display = 'block';
+  document.getElementById('report-list-view').style.display = 'flex';
   loadReports();
 }
 
@@ -887,50 +887,92 @@ function switchTab(tabName) {
 }
 
 // ============================================================
-// レポート
+// ファイルブラウザ
 // ============================================================
 
+let fileBrowserPath = '';  // 現在表示中のディレクトリパス（ルートからの相対）
+
 async function loadReports() {
+  fileBrowserPath = '';
+  await renderFileDir('');
+}
+
+async function renderFileDir(dirPath) {
+  fileBrowserPath = dirPath;
   if (!currentAgentId) return;
-  const list = document.getElementById('report-list');
+  const entryList = document.getElementById('file-entry-list');
+  const breadcrumb = document.getElementById('file-breadcrumb');
+  entryList.innerHTML = '<div style="padding:8px; color:var(--text-muted); font-size:13px;">読み込み中...</div>';
+
+  // パンくずリスト更新
+  const parts = dirPath ? dirPath.split('/') : [];
+  let crumbs = `<span class="file-breadcrumb-item${dirPath === '' ? ' current' : ''}" data-path="">ルート</span>`;
+  parts.forEach((part, i) => {
+    const p = parts.slice(0, i + 1).join('/');
+    crumbs += `<span class="file-breadcrumb-sep">/</span>`;
+    crumbs += `<span class="file-breadcrumb-item${i === parts.length - 1 ? ' current' : ''}" data-path="${escapeHtml(p)}">${escapeHtml(part)}</span>`;
+  });
+  breadcrumb.innerHTML = crumbs;
+  breadcrumb.querySelectorAll('.file-breadcrumb-item:not(.current)').forEach(el => {
+    el.addEventListener('click', () => renderFileDir(el.dataset.path));
+  });
+
   try {
-    const data = await fetch(`${API}/agents/${currentAgentId}/reports`).then(r => r.json());
-    if (!data.length) {
-      list.innerHTML = '<div style="padding:16px; color:var(--text-secondary); font-size:13px;">レポートがありません</div>';
+    const url = `${API}/agents/${currentAgentId}/reports?path=${encodeURIComponent(dirPath)}`;
+    const data = await fetch(url).then(r => r.json());
+    const { dirs, files } = data;
+
+    if (!dirs.length && !files.length) {
+      entryList.innerHTML = '<div style="padding:8px; color:var(--text-muted); font-size:13px;">空のディレクトリ</div>';
       return;
     }
-    list.innerHTML = data.map(r => {
-      const d = new Date(r.mtime * 1000);
-      const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-      const parts = r.filename.replace(/\\/g, '/').split('/');
-      const name = parts[parts.length - 1];
-      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
-      return `<div class="report-item" data-filename="${escapeHtml(r.filename)}">
-        <span class="report-item-name"><span class="report-item-dir">${escapeHtml(dir)}</span>${escapeHtml(name)}</span>
-        <span class="report-item-date">${dateStr}</span>
+
+    let html = '';
+    dirs.forEach(d => {
+      html += `<div class="file-entry dir" data-path="${escapeHtml(d.path)}">
+        <span class="file-entry-icon">📁</span>
+        <span class="file-entry-name">${escapeHtml(d.name)}</span>
       </div>`;
-    }).join('');
-    list.querySelectorAll('.report-item').forEach(el => {
-      el.addEventListener('click', () => openReport(el.dataset.filename));
+    });
+    files.forEach(f => {
+      const cls = f.is_md ? 'file-md' : 'file-other';
+      const icon = f.is_md ? '📄' : '🔒';
+      const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
+      html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}" data-is-md="${f.is_md}">
+        <span class="file-entry-icon">${icon}</span>
+        <span class="file-entry-name">${escapeHtml(f.name)}</span>
+        <span class="file-entry-meta">${sizeStr}</span>
+      </div>`;
+    });
+    entryList.innerHTML = html;
+
+    entryList.querySelectorAll('.file-entry.dir').forEach(el => {
+      el.addEventListener('click', () => renderFileDir(el.dataset.path));
+    });
+    entryList.querySelectorAll('.file-entry.file-md').forEach(el => {
+      el.addEventListener('click', () => openReport(el.dataset.path));
     });
   } catch (e) {
-    list.innerHTML = '<div style="padding:16px; color:var(--danger); font-size:13px;">読み込みエラー</div>';
+    entryList.innerHTML = '<div style="padding:8px; color:var(--danger); font-size:13px;">読み込みエラー</div>';
   }
 }
 
-async function openReport(filename) {
+async function openReport(filepath) {
   const detailPane = document.getElementById('report-detail-pane');
   const listView = document.getElementById('report-list-view');
   const titleEl = document.getElementById('report-detail-title');
   const bodyEl = document.getElementById('report-detail-body');
 
-  titleEl.textContent = filename;
-  bodyEl.innerHTML = '<div style="color:var(--text-secondary);">読み込み中...</div>';
+  const name = filepath.split('/').pop();
+  titleEl.textContent = name;
+  bodyEl.innerHTML = '<div style="color:var(--text-muted);">読み込み中...</div>';
   listView.style.display = 'none';
   detailPane.style.display = 'flex';
 
   try {
-    const text = await fetch(`${API}/agents/${currentAgentId}/reports/${encodeURIComponent(filename)}`).then(r => r.text());
+    const pathParts = filepath.split('/');
+    const encoded = pathParts.map(encodeURIComponent).join('/');
+    const text = await fetch(`${API}/agents/${currentAgentId}/reports/${encoded}`).then(r => r.text());
     if (typeof marked !== 'undefined') {
       bodyEl.innerHTML = marked.parse(text);
     } else {
@@ -944,7 +986,7 @@ async function openReport(filename) {
 function initReports() {
   document.getElementById('report-back-btn').addEventListener('click', () => {
     document.getElementById('report-detail-pane').style.display = 'none';
-    document.getElementById('report-list-view').style.display = '';
+    document.getElementById('report-list-view').style.display = 'flex';
   });
 }
 
