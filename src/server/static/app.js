@@ -876,24 +876,43 @@ async function loadSchedulerLogs() {
     const dt = new Date(log.timestamp);
     const dateStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
     const progress = log.total_after > 0 ? `${log.checked_after}/${log.total_after}` : '—';
-    const changed = log.progress_changed
-      ? `<span class="slog-changed">+${log.checked_after - log.checked_before}</span>`
-      : '<span class="slog-unchanged">変化なし</span>';
     const sessionShort = log.session_id ? log.session_id.slice(0, 8) : '—';
+    const stepsHtml = (log.completed_steps && log.completed_steps.length > 0)
+      ? log.completed_steps.map(s => `<div class="slog-step">✓ ${escapeHtml(s)}</div>`).join('')
+      : `<span class="slog-unchanged">${escapeHtml(log.current_step || '—')} の作業中</span>`;
     const errHtml = log.error ? `<div class="slog-error">${escapeHtml(log.error)}</div>` : '';
+    const sessionLink = log.session_id
+      ? `<a class="slog-link" data-session-id="${log.session_id}">session: ${sessionShort}</a>`
+      : '—';
     return `<div class="scheduler-log-entry${log.error ? ' slog-has-error' : ''}">
       <div class="slog-header">
         <span class="slog-time">${dateStr}</span>
-        <span class="slog-title">${escapeHtml(log.task_title || log.task_id)}</span>
-        ${changed}
+        <span class="slog-agent">${escapeHtml(log.agent_name || log.agent_id || '—')}</span>
+        <a class="slog-link slog-title" data-task-id="${log.task_id}">${escapeHtml(log.task_title || log.task_id)}</a>
+        <span class="slog-progress">${progress}</span>
       </div>
-      <div class="slog-meta">
-        <span class="slog-session">session: ${sessionShort}</span>
-        <span class="slog-progress">進捗: ${progress}</span>
-      </div>
+      <div class="slog-steps">${stepsHtml}</div>
+      <div class="slog-meta">${sessionLink}</div>
       ${errHtml}
     </div>`;
   }).join('');
+
+  // イベント委譲
+  el.onclick = async (e) => {
+    const taskLink = e.target.closest('[data-task-id]');
+    if (taskLink) {
+      closeSchedulerLog();
+      switchTab('tasks');
+      if (!tasksCache[taskLink.dataset.taskId]) await loadTasks();
+      selectTask(taskLink.dataset.taskId);
+      return;
+    }
+    const sessionLink = e.target.closest('[data-session-id]');
+    if (sessionLink) {
+      document.getElementById('chat-pane').classList.remove('hidden');
+      await selectSession(sessionLink.dataset.sessionId);
+    }
+  };
 }
 
 function isMobile() {
@@ -1516,6 +1535,7 @@ function escapeHtml(text) {
 // ============================================================
 
 function openSchedulerLog() {
+  document.querySelector('.sidebar').classList.remove('open');
   const pane = document.getElementById('scheduler-log-pane');
   pane.style.display = 'flex';
   loadSchedulerLogs();
@@ -1528,6 +1548,7 @@ function closeSchedulerLog() {
 function initScheduler() {
   document.getElementById('scheduler-log-btn').addEventListener('click', openSchedulerLog);
   document.getElementById('scheduler-log-back-btn').addEventListener('click', closeSchedulerLog);
+  document.getElementById('scheduler-log-refresh-btn').addEventListener('click', loadSchedulerLogs);
 
   const btn = document.getElementById('scheduler-toggle-btn');
   btn.addEventListener('click', async () => {
