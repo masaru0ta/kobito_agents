@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from server.config import AgentNotFoundError, ConfigManager
 from server.routes.deps import get_config_manager
@@ -82,6 +82,11 @@ def get_file(
     # パストラバーサル防止
     if not str(target).startswith(str(root)):
         raise HTTPException(status_code=400, detail="不正なファイルパス")
-    if not target.exists() or not target.is_file() or target.suffix.lower() != ".md":
+    if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="ファイルが見つかりません")
-    return PlainTextResponse(target.read_text(encoding="utf-8", errors="replace"))
+    suffix = target.suffix.lower()
+    if suffix == ".html":
+        return FileResponse(target)
+    if suffix == ".md":
+        return PlainTextResponse(target.read_text(encoding="utf-8", errors="replace"))
+    raise HTTPException(status_code=400, detail="プレビュー非対応のファイル形式")

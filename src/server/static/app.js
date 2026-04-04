@@ -935,10 +935,13 @@ async function renderFileDir(dirPath) {
       </div>`;
     });
     files.forEach(f => {
-      const cls = f.is_md ? 'file-md' : 'file-other';
-      const icon = f.is_md ? '📄' : '🔒';
+      const ext = f.name.split('.').pop().toLowerCase();
+      const isMd = f.is_md;
+      const isHtml = ext === 'html';
+      const cls = isMd ? 'file-md' : isHtml ? 'file-html' : 'file-other';
+      const icon = isMd ? '📄' : isHtml ? '🌐' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
-      html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}" data-is-md="${f.is_md}">
+      html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}">
         <span class="file-entry-icon">${icon}</span>
         <span class="file-entry-name">${escapeHtml(f.name)}</span>
         <span class="file-entry-meta">${sizeStr}</span>
@@ -951,6 +954,13 @@ async function renderFileDir(dirPath) {
     });
     entryList.querySelectorAll('.file-entry.file-md').forEach(el => {
       el.addEventListener('click', () => openReport(el.dataset.path));
+    });
+    entryList.querySelectorAll('.file-entry.file-html').forEach(el => {
+      el.addEventListener('click', () => {
+        const pathParts = el.dataset.path.split('/');
+        const encoded = pathParts.map(encodeURIComponent).join('/');
+        window.open(`${API}/agents/${currentAgentId}/reports/${encoded}`, '_blank');
+      });
     });
   } catch (e) {
     entryList.innerHTML = '<div style="padding:8px; color:var(--danger); font-size:13px;">読み込みエラー</div>';
