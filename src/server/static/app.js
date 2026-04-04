@@ -969,7 +969,7 @@ function renderFileDirEntries(data) {
     if (entry._type === 'dir') {
       html += `<div class="file-entry dir" data-path="${escapeHtml(entry.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(entry.name)}</span></div>
-        <div class="file-entry-meta">更新日 ${fmt(entry.mtime)}</div>
+        <div class="file-entry-meta">${fmt(entry.mtime)} 更新</div>
       </div>`;
     } else {
       const f = entry;
@@ -980,7 +980,7 @@ function renderFileDirEntries(data) {
       const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : 'file-other';
       const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
-      const meta = `${sizeStr} · 更新日 ${fmt(f.mtime)}`;
+      const meta = `${sizeStr} · ${fmt(f.mtime)} 更新`;
       const row2 = f.preview
         ? `<div class="file-entry-preview">${escapeHtml(f.preview)}</div><div class="file-entry-meta">${meta}</div>`
         : `<div class="file-entry-meta">${meta}</div>`;
