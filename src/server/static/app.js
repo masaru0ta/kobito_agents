@@ -933,7 +933,7 @@ async function renderFileDir(dirPath) {
       const ddStr = dd.toLocaleDateString('ja-JP') + ' ' + dd.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
       html += `<div class="file-entry dir" data-path="${escapeHtml(d.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(d.name)}</span></div>
-        <div class="file-entry-meta">フォルダ · ${ddStr}</div>
+        <div class="file-entry-meta">フォルダ · 更新日 ${ddStr}</div>
       </div>`;
     });
     files.forEach(f => {
@@ -946,7 +946,7 @@ async function renderFileDir(dirPath) {
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
       const d = new Date(f.mtime * 1000);
       const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-      const meta = `${sizeStr} · ${dateStr}`;
+      const meta = `${sizeStr} · 更新日 ${dateStr}`;
       const row2 = f.preview
         ? `<div class="file-entry-preview">${escapeHtml(f.preview)}</div><div class="file-entry-meta">${meta}</div>`
         : `<div class="file-entry-meta">${meta}</div>`;
