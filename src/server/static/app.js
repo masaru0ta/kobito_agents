@@ -241,10 +241,7 @@ function renderSessions(sessions) {
     return;
   }
   list.innerHTML = sessions.map(s => {
-    const date = new Date(s.updated_at).toLocaleString('ja-JP', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
+    const date = formatDate(s.updated_at);
     const isInferring = inferringSessions.has(s.session_id);
     const statusHtml = isInferring
       ? '<div class="conv-status"><div class="spinner"></div><span class="label">応答待ち</span></div>'
@@ -334,7 +331,7 @@ async function loadSessionHistory(sessionId, force = false) {
   renderMessages(messages, sessionId);
 
   const date = messages.length > 0
-    ? new Date(messages[0].timestamp).toLocaleString('ja-JP')
+    ? formatDate(messages[0].timestamp)
     : '';
   document.getElementById('chat-title').textContent = currentSessionTitle || (date ? `${date} の会話` : '');
 }
@@ -374,7 +371,7 @@ function renderMessages(messages, sessionId) {
     div.className = `message ${m.role}`;
 
     const sender = m.role === 'user' ? 'あなた' : agentName;
-    const time = new Date(m.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const time = formatDate(m.timestamp);
 
     // Markdownレンダリング（assistantのみ）
     const bubbleContent = m.role === 'assistant' && typeof marked !== 'undefined'
@@ -945,15 +942,7 @@ function renderFileDirEntries(data) {
     return;
   }
 
-  const DOW = ['日','月','火','水','木','金','土'];
-  const fmt = ts => {
-    const d = new Date(ts * 1000);
-    const now = new Date();
-    const year = d.getFullYear() !== now.getFullYear() ? `${d.getFullYear()}/` : '';
-    const date = `${d.getMonth() + 1}/${d.getDate()}${DOW[d.getDay()]}`;
-    const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-    return `${year}${date} ${time}`;
-  };
+  const fmt = ts => formatDate(ts * 1000);
 
   const orderedAll = [
     ...dirs.map(d => ({ ...d, _type: 'dir' })),
@@ -1102,8 +1091,7 @@ async function loadSchedulerLogs() {
     return;
   }
   el.innerHTML = logs.map(log => {
-    const dt = new Date(log.timestamp);
-    const dateStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    const dateStr = formatDate(log.timestamp);
     const progress = log.total_after > 0 ? `${log.checked_after}/${log.total_after}` : '—';
     const sessionShort = log.session_id ? log.session_id.slice(0, 8) : '—';
     const stepsHtml = (log.completed_steps && log.completed_steps.length > 0)
@@ -1582,7 +1570,7 @@ async function renderTaskDetail(taskId) {
 `;
   } else if (task.approval === 'approved') {
     const dt = task.approved_at
-      ? new Date(task.approved_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      ? formatDate(task.approved_at)
       : '';
     approvalHtml = `<div class="approval-status-badge approved">✓ 承認済み${dt ? ' (' + dt + ')' : ''}</div>`;
   }
@@ -1618,7 +1606,7 @@ async function renderTaskDetail(taskId) {
   });
 
   const bodyEl = document.getElementById('task-detail-body');
-  const created = new Date(task.created).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const created = formatDate(task.created);
   const bodyHtml = task.body ? marked.parse(task.body) : '';
 
   const totalSteps = (task.body.match(/- \[[ x]\]/g) || []).length;
@@ -1708,9 +1696,18 @@ function enterTaskEditMode() {
   });
 }
 
+const _DOW = ['日','月','火','水','木','金','土'];
+function formatDate(input) {
+  const d = new Date(input);
+  const now = new Date();
+  const year = d.getFullYear() !== now.getFullYear() ? `${d.getFullYear()}/` : '';
+  const date = `${d.getMonth() + 1}/${d.getDate()}${_DOW[d.getDay()]}`;
+  const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  return `${year}${date} ${time}`;
+}
+
 function formatTaskDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return formatDate(iso);
 }
 
 
