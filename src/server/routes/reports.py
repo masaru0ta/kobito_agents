@@ -72,11 +72,16 @@ def list_dir(
                     if is_md:
                         try:
                             with entry.open(encoding="utf-8", errors="replace") as fh:
+                                first = True
                                 for line in fh:
                                     line = line.strip()
-                                    if line:
-                                        preview = line.lstrip("#").strip()
-                                        break
+                                    if not line:
+                                        continue
+                                    if first and line == "---":
+                                        first = False
+                                        continue
+                                    preview = line.lstrip("#").strip()
+                                    break
                         except OSError:
                             pass
                     files.append({
