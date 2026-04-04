@@ -686,6 +686,7 @@ body {
 .file-entry.dir .file-entry-icon { color: #e8b84b; }
 .file-entry.file-md .file-entry-icon { color: #6b9cf7; }
 .file-entry.file-html .file-entry-icon { color: #68d391; }
+.file-entry.file-img .file-entry-icon { color: #f6ad55; }
 .file-entry.file-other { cursor: default; opacity: 0.55; }
 .file-entry-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
 .file-entry-name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }

@@ -935,11 +935,12 @@ async function renderFileDir(dirPath) {
       </div>`;
     });
     files.forEach(f => {
-      const ext = f.name.split('.').pop().toLowerCase();
       const isMd = f.is_md;
+      const isImage = f.is_image;
+      const ext = f.name.split('.').pop().toLowerCase();
       const isHtml = ext === 'html';
-      const cls = isMd ? 'file-md' : isHtml ? 'file-html' : 'file-other';
-      const icon = isMd ? '📄' : isHtml ? '🌐' : '🔒';
+      const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : 'file-other';
+      const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
       html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}">
         <span class="file-entry-icon">${icon}</span>
@@ -954,6 +955,9 @@ async function renderFileDir(dirPath) {
     });
     entryList.querySelectorAll('.file-entry.file-md').forEach(el => {
       el.addEventListener('click', () => openReport(el.dataset.path));
+    });
+    entryList.querySelectorAll('.file-entry.file-img').forEach(el => {
+      el.addEventListener('click', () => openImageFile(el.dataset.path));
     });
     entryList.querySelectorAll('.file-entry.file-html').forEach(el => {
       el.addEventListener('click', () => {
@@ -991,6 +995,22 @@ async function openReport(filepath) {
   } catch (e) {
     bodyEl.innerHTML = '<div style="color:var(--danger);">読み込みエラー</div>';
   }
+}
+
+function openImageFile(filepath) {
+  const detailPane = document.getElementById('report-detail-pane');
+  const listView = document.getElementById('report-list-view');
+  const titleEl = document.getElementById('report-detail-title');
+  const bodyEl = document.getElementById('report-detail-body');
+
+  const name = filepath.split('/').pop();
+  titleEl.textContent = name;
+  const pathParts = filepath.split('/');
+  const encoded = pathParts.map(encodeURIComponent).join('/');
+  const url = `${API}/agents/${currentAgentId}/reports/${encoded}`;
+  bodyEl.innerHTML = `<div style="text-align:center; padding:8px;"><img src="${url}" style="max-width:100%; height:auto; border-radius:6px;" alt="${escapeHtml(name)}"></div>`;
+  listView.style.display = 'none';
+  detailPane.style.display = 'flex';
 }
 
 function initReports() {

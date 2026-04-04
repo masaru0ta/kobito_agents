@@ -57,6 +57,7 @@ def list_dir(
                         "size": st.st_size,
                         "mtime": st.st_mtime,
                         "is_md": entry.suffix.lower() == ".md",
+                    "is_image": entry.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"},
                     })
                 except OSError:
                     continue
@@ -85,7 +86,7 @@ def get_file(
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="ファイルが見つかりません")
     suffix = target.suffix.lower()
-    if suffix == ".html":
+    if suffix in {".html", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
         return FileResponse(target)
     if suffix == ".md":
         return PlainTextResponse(target.read_text(encoding="utf-8", errors="replace"))
