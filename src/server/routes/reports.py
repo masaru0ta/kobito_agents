@@ -93,6 +93,11 @@ def list_dir(
                                     if raw.startswith("/*"):
                                         in_block_comment = True
                                     if in_block_comment:
+                                        # コメント行の内容を抽出 (* を除去)
+                                        content = raw.lstrip("/*").strip()
+                                        if content and content != entry.name:
+                                            preview = content
+                                            break
                                         if "*/" in raw:
                                             in_block_comment = False
                                         continue
