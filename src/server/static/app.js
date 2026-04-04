@@ -930,8 +930,8 @@ async function renderFileDir(dirPath) {
     let html = '';
     dirs.forEach(d => {
       html += `<div class="file-entry dir" data-path="${escapeHtml(d.path)}">
-        <span class="file-entry-icon">📁</span>
-        <span class="file-entry-name">${escapeHtml(d.name)}</span>
+        <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(d.name)}</span></div>
+        <div class="file-entry-row2">フォルダ</div>
       </div>`;
     });
     files.forEach(f => {
@@ -942,10 +942,11 @@ async function renderFileDir(dirPath) {
       const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : 'file-other';
       const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
+      const d = new Date(f.mtime * 1000);
+      const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
       html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}">
-        <span class="file-entry-icon">${icon}</span>
-        <span class="file-entry-name">${escapeHtml(f.name)}</span>
-        <span class="file-entry-meta">${sizeStr}</span>
+        <div class="file-entry-row1"><span class="file-entry-icon">${icon}</span><span class="file-entry-name">${escapeHtml(f.name)}</span></div>
+        <div class="file-entry-row2">${sizeStr} · ${dateStr}</div>
       </div>`;
     });
     entryList.innerHTML = html;

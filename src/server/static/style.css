@@ -681,16 +681,17 @@ body {
 .file-breadcrumb-item:hover { background: var(--bg-hover); }
 .file-breadcrumb-item.current { color: var(--text-primary); cursor: default; font-weight: 600; }
 .file-breadcrumb-item.current:hover { background: none; }
-.file-entry { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 5px; cursor: pointer; transition: background 0.12s; user-select: none; }
+.file-entry { padding: 10px 12px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s; margin-bottom: 2px; user-select: none; }
 .file-entry:hover { background: var(--bg-hover); }
+.file-entry.file-other { cursor: default; opacity: 0.55; }
+.file-entry-row1 { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.file-entry-icon { font-size: 13px; flex-shrink: 0; }
 .file-entry.dir .file-entry-icon { color: #e8b84b; }
 .file-entry.file-md .file-entry-icon { color: #6b9cf7; }
 .file-entry.file-html .file-entry-icon { color: #68d391; }
 .file-entry.file-img .file-entry-icon { color: #f6ad55; }
-.file-entry.file-other { cursor: default; opacity: 0.55; }
-.file-entry-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
-.file-entry-name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.file-entry-meta { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 4px; }
+.file-entry-name { font-size: 14px; color: var(--accent); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-entry-row2 { font-size: 11px; color: var(--text-muted); }
 #report-detail-body { font-size: 14px; line-height: 1.6; word-break: break-word; color: var(--text-primary); }
 #report-detail-body h1, #report-detail-body h2, #report-detail-body h3, #report-detail-body h4 { color: var(--accent); margin: 0.6em 0 0.3em; }
 #report-detail-body h1 { font-size: 1.3em; }
