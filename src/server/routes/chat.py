@@ -218,6 +218,22 @@ def hide_session(
     return {"status": "ok"}
 
 
+@router.post("/sessions/{session_id}/stop")
+async def stop_session(
+    agent_id: str,
+    session_id: str,
+    config: ConfigManager = Depends(get_config_manager),
+    bridge: CLIBridge = Depends(get_cli_bridge),
+):
+    """推論中のセッションプロセスを強制停止する"""
+    try:
+        agent = config.get_agent(agent_id)
+    except AgentNotFoundError:
+        raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
+    stopped = await bridge.stop_session(agent.path, session_id)
+    return {"status": "ok", "stopped": stopped}
+
+
 @router.post("/cli")
 def launch_cli(
     agent_id: str,

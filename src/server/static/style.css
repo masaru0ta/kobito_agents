@@ -179,6 +179,8 @@ body {
 .chat-input::placeholder { color: var(--text-muted); }
 .send-btn { padding: 10px 20px; background: var(--accent-bg); border: none; border-radius: 8px; color: #fff; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
 .send-btn:hover { background: var(--accent-hover); }
+.stop-btn { padding: 10px 20px; background: var(--danger); border: none; border-radius: 8px; color: #fff; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
+.stop-btn:hover { background: #da3633; }
 .input-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
 .model-select { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 11px; padding: 2px 6px; outline: none; cursor: pointer; }
 .model-select:focus { border-color: var(--accent); }

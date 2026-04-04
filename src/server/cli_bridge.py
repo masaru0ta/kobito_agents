@@ -624,6 +624,31 @@ class CLIBridge:
 
         return result
 
+    async def stop_session(self, project_path: str, session_id: str) -> bool:
+        """指定セッションのプロセスを強制終了する。終了できたら True を返す。"""
+        prefix = f"{project_path}::"
+        key = f"{prefix}{session_id}"
+        async with self._pool_lock:
+            mp = self._pool.pop(key, None)
+        if mp:
+            mp.message_sent_at = 0.0
+            _remove_pid_file(project_path, session_id)
+            mp.kill()
+            print(f"[STOP] プロセス停止 sid={session_id} pid={mp.proc.pid}", flush=True)
+            return True
+        # プールにない場合はPIDファイルを確認
+        pid_file = Path(project_path) / ".kobito" / "alive" / f"{session_id}.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text(encoding="utf-8").strip())
+                psutil.Process(pid).terminate()
+                pid_file.unlink(missing_ok=True)
+                print(f"[STOP] 孤児プロセス停止 sid={session_id} pid={pid}", flush=True)
+                return True
+            except Exception:
+                pass
+        return False
+
     def launch_cli(self, project_path: str, session_id: str | None = None) -> None:
         """ターミナルでCLIを起動する（Windowsのみ）"""
         cmd_parts = ["claude"]

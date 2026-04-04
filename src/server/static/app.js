@@ -13,6 +13,7 @@ let lastDirMtime = 0;     // セッションディレクトリの前回mtime
 let lastWatchingMtime = 0; // 表示中セッションJSONLの前回mtime
 let lastStartupId = null;  // サーバー起動IDキャッシュ（変化でリロード検知）
 const sessionDomCache = {}; // { sessionId: { el: HTMLElement, stale: boolean } } セッションDOMキャッシュ
+let currentStreamAbort = null; // 現在アクティブなSSEストリームのAbortController
 
 // ============================================================
 // 初期化
@@ -444,6 +445,19 @@ function initInput() {
   const sendBtn = document.getElementById('send-btn');
 
   sendBtn.addEventListener('click', sendMessage);
+
+  document.getElementById('stop-btn').addEventListener('click', async () => {
+    const sid = currentSessionId;
+    // SSEストリームを中断
+    if (currentStreamAbort) {
+      currentStreamAbort.abort();
+      currentStreamAbort = null;
+    }
+    // サーバー側のプロセスを停止
+    if (sid && currentAgentId) {
+      await fetch(`${API}/agents/${currentAgentId}/sessions/${sid}/stop`, { method: 'POST' });
+    }
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -589,7 +603,18 @@ async function sendMessage(opts = {}) {
   const streamKey = sentSessionId || 'new';
   inferringSessions.add(streamKey);
   activeStreams.add(streamKey);
+
+  // 中断ボタンを表示
+  const stopBtn = document.getElementById('stop-btn');
+  const sendBtn = document.getElementById('send-btn');
+  stopBtn.style.display = '';
+  sendBtn.style.display = 'none';
+
   await loadSessions();
+
+  // AbortControllerを設定して中断可能にする
+  const abort = new AbortController();
+  currentStreamAbort = abort;
 
   try {
     const modelTier = document.getElementById('model-select').value;
@@ -600,6 +625,7 @@ async function sendMessage(opts = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: abort.signal,
     });
 
     // SSEストリーミング
@@ -691,6 +717,9 @@ async function sendMessage(opts = {}) {
         console.warn('[STREAM] 再起動検知(SSEエラー) sid:', sentSessionId, 'error:', streamError);
         showToast('サーバーが再起動されました。応答を受信待ちです...');
       }
+      stopBtn.style.display = 'none';
+      sendBtn.style.display = '';
+      currentStreamAbort = null;
       await loadSessions();
       return;
     }
@@ -709,6 +738,9 @@ async function sendMessage(opts = {}) {
     }
     // SSE中にスキップされたwatching_mtime変化を次のポーリングで拾うためリセット
     lastWatchingMtime = 0;
+    stopBtn.style.display = 'none';
+    sendBtn.style.display = '';
+    currentStreamAbort = null;
     await loadSessions();
 
     if (thinkingEl.parentNode) {
@@ -717,9 +749,12 @@ async function sendMessage(opts = {}) {
     }
 
   } catch (e) {
-    // SSEストリーム切断 — ストリーム追跡は解除し、インジケーターはポーリングに委ねる
+    // SSEストリーム切断（中断含む） — ストリーム追跡は解除し、インジケーターはポーリングに委ねる
     activeStreams.delete(sentSessionId || 'new');
     lastWatchingMtime = 0;
+    stopBtn.style.display = 'none';
+    sendBtn.style.display = '';
+    currentStreamAbort = null;
     await loadSessions();
   }
 }
