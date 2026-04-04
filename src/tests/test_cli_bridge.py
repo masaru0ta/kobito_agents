@@ -34,16 +34,13 @@ class TestBuildCommand:
 
         assert "--resume" not in cmd
 
-    def test_system_promptが指定される(self):
+    def test_共通指示ファイルが追加される(self):
         from server.cli_bridge import CLIBridge
 
         bridge = CLIBridge()
-        cmd = bridge._build_command(
-            model="opus",
-            system_prompt="あなたはテスト用AIです",
-        )
+        cmd = bridge._build_command(model="opus")
 
-        assert "--system-prompt" in cmd
+        assert "--append-system-prompt-file" in cmd
 
 
 class TestModelMapping:

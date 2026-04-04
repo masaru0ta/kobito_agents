@@ -28,6 +28,9 @@ from server.pid_manager import (
 
 logger = logging.getLogger(__name__)
 
+# 共通指示ファイル（全エージェントの新規セッションに自動注入）
+_SHARED_INSTRUCTIONS_FILE = Path(__file__).resolve().parents[2] / "assets" / "prompts" / "shared_instructions.md"
+
 # モデルティアからモデル名へのマッピング
 MODEL_MAP = {
     "claude": {
@@ -301,8 +304,11 @@ class CLIBridge:
         self,
         model: str,
         session_id: str | None = None,
-        system_prompt: str | None = None,
     ) -> list[str]:
+        """CLIコマンドを構築する。
+        CLAUDE.md は Claude Code が cwd から自動検出するため --system-prompt は使わない。
+        共通指示のみ --append-system-prompt-file で追加注入する。
+        """
         cmd = [
             self._find_claude(),
             "-p", "",
@@ -314,8 +320,8 @@ class CLIBridge:
         if session_id:
             cmd.extend(["--resume", session_id])
         else:
-            if system_prompt:
-                cmd.extend(["--system-prompt", system_prompt])
+            if _SHARED_INSTRUCTIONS_FILE.exists():
+                cmd.extend(["--append-system-prompt-file", str(_SHARED_INSTRUCTIONS_FILE)])
         return cmd
 
     def _spawn_process(self, project_path: str, cmd: list[str]) -> subprocess.Popen:
@@ -336,7 +342,6 @@ class CLIBridge:
         project_path: str,
         model: str,
         session_id: str | None,
-        system_prompt: str | None,
     ) -> tuple[ManagedProcess, str]:
         """既存プロセスを取得、またはなければ新規作成"""
         key = self._pool_key(project_path, session_id)
@@ -361,7 +366,7 @@ class CLIBridge:
                 return mp, key
 
             # 新規作成
-            cmd = self._build_command(model, session_id, system_prompt)
+            cmd = self._build_command(model, session_id)
             proc = self._spawn_process(project_path, cmd)
             mp = ManagedProcess(proc=proc, model=model, session_id=session_id or "", project_path=project_path)
             loop = asyncio.get_running_loop()
@@ -383,11 +388,10 @@ class CLIBridge:
         prompt: str,
         model: str,
         session_id: str | None = None,
-        system_prompt: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """メッセージを送信し、resultイベントまでのストリームをyieldする"""
         mp, key = await self._get_or_create_process(
-            project_path, model, session_id, system_prompt,
+            project_path, model, session_id,
         )
 
         async with mp.lock:

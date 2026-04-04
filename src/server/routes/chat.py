@@ -106,7 +106,6 @@ async def send_chat(
                 prompt=prompt,
                 model=model,
                 session_id=body.session_id,
-                system_prompt=agent.system_prompt if not body.session_id else None,
             )
             async for raw_event in stream:
                 # _ping は接続維持のためのダミーイベント（15秒無応答時にrun_stream側で生成）
