@@ -672,3 +672,17 @@ body {
 .slog-unchanged { color: var(--text-muted); }
 .slog-meta { display: flex; gap: 12px; color: var(--text-muted); }
 .slog-error { color: #f85149; margin-top: 4px; word-break: break-all; }
+
+/* レポート */
+.report-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 6px; cursor: pointer; transition: background 0.15s; }
+.report-item:hover { background: var(--bg-hover); }
+.report-item-name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-item-dir { color: var(--text-muted); font-size: 12px; }
+.report-item-date { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 8px; }
+#report-detail-body h1, #report-detail-body h2, #report-detail-body h3 { margin: 1em 0 0.5em; }
+#report-detail-body p { margin-bottom: 0.8em; }
+#report-detail-body pre { background: var(--bg-tertiary); padding: 10px; border-radius: 6px; overflow-x: auto; margin-bottom: 0.8em; }
+#report-detail-body code { background: var(--bg-tertiary); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+#report-detail-body table { border-collapse: collapse; width: 100%; margin-bottom: 0.8em; }
+#report-detail-body th, #report-detail-body td { border: 1px solid var(--border); padding: 6px 10px; font-size: 13px; }
+#report-detail-body th { background: var(--bg-tertiary); }

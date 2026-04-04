@@ -32,6 +32,7 @@
       <button class="sidebar-toggle" id="sidebar-toggle" title="エージェント一覧">☰</button>
       <div class="tab active" data-tab="chat">セッション</div>
       <div class="tab" data-tab="tasks">タスク</div>
+      <div class="tab" data-tab="reports">レポート</div>
       <div class="tab" data-tab="settings">設定</div>
     </div>
 
@@ -49,6 +50,20 @@
       <div id="task-detail-pane" class="task-detail-pane" style="position:absolute; inset:0; display:none; flex-direction:column;">
         <div class="task-detail-header" id="task-detail-header"></div>
         <div class="task-detail-body" id="task-detail-body"></div>
+      </div>
+    </div>
+
+    <!-- レポートタブ -->
+    <div id="reports-tab-content" style="display:none; flex:1; overflow:hidden; position:relative;">
+      <div id="report-list-view" style="position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; padding:8px;">
+        <div id="report-list"></div>
+      </div>
+      <div id="report-detail-pane" style="position:absolute; inset:0; display:none; flex-direction:column;">
+        <div class="task-detail-header" style="display:flex; align-items:center; gap:8px;">
+          <button class="task-back-btn" id="report-back-btn">←</button>
+          <span id="report-detail-title" style="font-weight:600; font-size:14px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+        </div>
+        <div id="report-detail-body" style="flex:1; overflow-y:auto; padding:16px; font-size:13px; line-height:1.7;"></div>
       </div>
     </div>
 

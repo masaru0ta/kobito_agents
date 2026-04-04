@@ -18,6 +18,7 @@ from server.cli_bridge import CLIBridge, cleanup_orphaned_processes
 from server.routes.agents import router as agents_router
 from server.routes.chat import router as chat_router
 from server.routes.tasks import router as tasks_router
+from server.routes.reports import router as reports_router
 from server.routes.scheduler import router as scheduler_router
 from server.scheduler import Scheduler
 
@@ -78,6 +79,7 @@ def create_app(
     app.include_router(agents_router)
     app.include_router(chat_router)
     app.include_router(tasks_router)
+    app.include_router(reports_router)
     app.include_router(scheduler_router)
 
     static_dir = Path(__file__).parent / "static"

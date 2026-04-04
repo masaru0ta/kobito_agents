@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initInput();
   initActions();
   initTasks();
+  initReports();
   initResponsive();
 
   // サーバー再起動ボタン
@@ -850,14 +851,15 @@ function switchTab(tabName) {
   const chatContent = document.getElementById('chat-tab-content');
   const settingsContent = document.getElementById('settings-tab-content');
   const tasksContent = document.getElementById('tasks-tab-content');
+  const reportsContent = document.getElementById('reports-tab-content');
   const chatPane = document.getElementById('chat-pane');
   const settingsPane = document.getElementById('settings-pane');
-  const taskDetailPane = document.getElementById('task-detail-pane');
 
   // 中央ペインを切り替え
   chatContent.style.display = 'none';
   settingsContent.classList.remove('visible');
   tasksContent.style.display = 'none';
+  reportsContent.style.display = 'none';
 
   // 右ペインを切り替え
   settingsPane.classList.remove('visible');
@@ -867,14 +869,79 @@ function switchTab(tabName) {
     chatPane.classList.remove('hidden');
   } else if (tabName === 'tasks') {
     tasksContent.style.display = 'flex';
-    // セッション表示中はチャットペインをそのまま維持
     if (!currentSessionId) chatPane.classList.add('hidden');
+  } else if (tabName === 'reports') {
+    reportsContent.style.display = 'flex';
+    if (!currentSessionId) chatPane.classList.add('hidden');
+    loadReports();
   } else if (tabName === 'settings') {
     settingsContent.classList.add('visible');
     chatPane.classList.add('hidden');
     settingsPane.classList.add('visible');
     loadSettingsData();
   }
+}
+
+// ============================================================
+// レポート
+// ============================================================
+
+async function loadReports() {
+  if (!currentAgentId) return;
+  const list = document.getElementById('report-list');
+  try {
+    const data = await fetch(`${API}/agents/${currentAgentId}/reports`).then(r => r.json());
+    if (!data.length) {
+      list.innerHTML = '<div style="padding:16px; color:var(--text-secondary); font-size:13px;">レポートがありません</div>';
+      return;
+    }
+    list.innerHTML = data.map(r => {
+      const d = new Date(r.mtime * 1000);
+      const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      const parts = r.filename.replace(/\\/g, '/').split('/');
+      const name = parts[parts.length - 1];
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
+      return `<div class="report-item" data-filename="${escapeHtml(r.filename)}">
+        <span class="report-item-name"><span class="report-item-dir">${escapeHtml(dir)}</span>${escapeHtml(name)}</span>
+        <span class="report-item-date">${dateStr}</span>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.report-item').forEach(el => {
+      el.addEventListener('click', () => openReport(el.dataset.filename));
+    });
+  } catch (e) {
+    list.innerHTML = '<div style="padding:16px; color:var(--danger); font-size:13px;">読み込みエラー</div>';
+  }
+}
+
+async function openReport(filename) {
+  const detailPane = document.getElementById('report-detail-pane');
+  const listView = document.getElementById('report-list-view');
+  const titleEl = document.getElementById('report-detail-title');
+  const bodyEl = document.getElementById('report-detail-body');
+
+  titleEl.textContent = filename;
+  bodyEl.innerHTML = '<div style="color:var(--text-secondary);">読み込み中...</div>';
+  listView.style.display = 'none';
+  detailPane.style.display = 'flex';
+
+  try {
+    const text = await fetch(`${API}/agents/${currentAgentId}/reports/${encodeURIComponent(filename)}`).then(r => r.text());
+    if (typeof marked !== 'undefined') {
+      bodyEl.innerHTML = marked.parse(text);
+    } else {
+      bodyEl.innerHTML = `<pre style="white-space:pre-wrap; font-size:13px;">${escapeHtml(text)}</pre>`;
+    }
+  } catch (e) {
+    bodyEl.innerHTML = '<div style="color:var(--danger);">読み込みエラー</div>';
+  }
+}
+
+function initReports() {
+  document.getElementById('report-back-btn').addEventListener('click', () => {
+    document.getElementById('report-detail-pane').style.display = 'none';
+    document.getElementById('report-list-view').style.display = '';
+  });
 }
 
 // ============================================================

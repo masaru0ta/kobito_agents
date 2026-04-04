@@ -283,7 +283,6 @@ class Scheduler:
                 prompt=prompt,
                 model=model,
                 session_id=session_id,
-                system_prompt=agent.system_prompt if not session_id else None,
             ):
                 ev = parse_stream_event(raw_event)
 
