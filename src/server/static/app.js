@@ -97,6 +97,10 @@ async function selectAgent(agentId) {
   // タスク詳細を閉じてタスク一覧を読み込む
   backToTaskList();
   await loadTasks();
+  // レポート詳細を閉じてレポート一覧を読み込む
+  document.getElementById('report-detail-pane').style.display = 'none';
+  document.getElementById('report-list-view').style.display = 'block';
+  loadReports();
 }
 
 async function pollProcessStatus() {
