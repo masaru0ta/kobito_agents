@@ -945,9 +945,14 @@ function renderFileDirEntries(data) {
     return;
   }
 
+  const DOW = ['日','月','火','水','木','金','土'];
   const fmt = ts => {
     const d = new Date(ts * 1000);
-    return d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const now = new Date();
+    const year = d.getFullYear() !== now.getFullYear() ? `${d.getFullYear()}/` : '';
+    const date = `${d.getMonth() + 1}/${d.getDate()}${DOW[d.getDay()]}`;
+    const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    return `${year}${date} ${time}`;
   };
 
   const orderedAll = [
