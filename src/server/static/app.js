@@ -891,7 +891,7 @@ function switchTab(tabName) {
 // ============================================================
 
 let fileBrowserPath = '';   // 現在表示中のディレクトリパス（ルートからの相対）
-let fileBrowserSort = 'name';  // 'name' | 'mtime'
+let fileBrowserSort = 'mtime';  // 'name' | 'mtime'
 let fileBrowserCache = null;   // 最後にフェッチしたディレクトリデータ
 
 async function loadReports() {
