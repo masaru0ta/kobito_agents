@@ -1145,6 +1145,18 @@ function initActions() {
     await loadSessions();
   });
 
+  // メニュー: 完全削除
+  document.getElementById('btn-delete-session').addEventListener('click', async () => {
+    chatMenu.classList.remove('open');
+    if (!currentAgentId || !currentSessionId) return;
+    if (!confirm('この会話セッションを完全削除しますか？\nメタデータと会話ログが削除されます。この操作は取り消せません。')) return;
+    const sid = currentSessionId;
+    currentSessionId = null;
+    clearChat();
+    await fetch(`${API}/agents/${currentAgentId}/sessions/${sid}`, { method: 'DELETE' });
+    await loadSessions();
+  });
+
   // 新規会話
   document.getElementById('new-chat-btn').addEventListener('click', () => {
     currentSessionId = null;
