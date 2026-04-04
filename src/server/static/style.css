@@ -686,6 +686,7 @@ body {
 .file-breadcrumb-item.current:hover { background: none; }
 .file-entry { padding: 10px 12px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s; margin-bottom: 2px; user-select: none; }
 .file-entry:hover { background: var(--bg-hover); }
+.file-entry.file-json .file-entry-icon { color: #f0b429; }
 .file-entry.file-other { cursor: default; opacity: 0.55; }
 .file-entry-row1 { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
 .file-entry-icon { font-size: 13px; flex-shrink: 0; }
@@ -715,3 +716,9 @@ body {
 #report-detail-body th, #report-detail-body td { border: 1px solid #4a5568; padding: 6px 10px; font-size: 13px; }
 #report-detail-body th { background: var(--bg-tertiary); color: var(--accent); font-weight: 600; }
 #report-detail-body td { background: #2d333b; }
+.json-viewer { font-family: 'Consolas','Monaco',monospace; font-size: 12px; line-height: 1.6; background: var(--bg-primary); padding: 14px; border-radius: 6px; border: 1px solid var(--border); overflow-x: auto; white-space: pre; }
+.json-key  { color: #79b8ff; }
+.json-str  { color: #85e89d; }
+.json-num  { color: #f8c555; }
+.json-bool { color: #79b8ff; }
+.json-null { color: #959da5; }

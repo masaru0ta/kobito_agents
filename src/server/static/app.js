@@ -964,10 +964,11 @@ function renderFileDirEntries(data) {
       const f = entry;
       const isMd = f.is_md;
       const isImage = f.is_image;
+      const isJson = f.is_json;
       const ext = f.name.split('.').pop().toLowerCase();
       const isHtml = ext === 'html';
-      const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : 'file-other';
-      const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : '🔒';
+      const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : isJson ? 'file-json' : 'file-other';
+      const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : isJson ? '{ }' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
       const meta = `${sizeStr} · ${fmt(f.mtime)} 更新`;
       const row2 = f.preview
@@ -989,6 +990,9 @@ function renderFileDirEntries(data) {
   });
   entryList.querySelectorAll('.file-entry.file-img').forEach(el => {
     el.addEventListener('click', () => openImageFile(el.dataset.path));
+  });
+  entryList.querySelectorAll('.file-entry.file-json').forEach(el => {
+    el.addEventListener('click', () => openJsonFile(el.dataset.path));
   });
   entryList.querySelectorAll('.file-entry.file-html').forEach(el => {
     el.addEventListener('click', () => {
@@ -1039,6 +1043,46 @@ function openImageFile(filepath) {
   bodyEl.innerHTML = `<div style="text-align:center; padding:8px;"><img src="${url}" style="max-width:100%; height:auto; border-radius:6px;" alt="${escapeHtml(name)}"></div>`;
   listView.style.display = 'none';
   detailPane.style.display = 'flex';
+}
+
+function highlightJson(text) {
+  try {
+    const parsed = JSON.parse(text);
+    text = JSON.stringify(parsed, null, 2);
+  } catch (_) {}
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, match => {
+      if (/^"/.test(match)) {
+        return /:$/.test(match)
+          ? `<span class="json-key">${match}</span>`
+          : `<span class="json-str">${match}</span>`;
+      }
+      if (/true|false/.test(match)) return `<span class="json-bool">${match}</span>`;
+      if (/null/.test(match)) return `<span class="json-null">${match}</span>`;
+      return `<span class="json-num">${match}</span>`;
+    });
+}
+
+async function openJsonFile(filepath) {
+  const detailPane = document.getElementById('report-detail-pane');
+  const listView = document.getElementById('report-list-view');
+  const titleEl = document.getElementById('report-detail-title');
+  const bodyEl = document.getElementById('report-detail-body');
+
+  titleEl.textContent = filepath.split('/').pop();
+  bodyEl.innerHTML = '<div style="color:var(--text-muted);">読み込み中...</div>';
+  listView.style.display = 'none';
+  detailPane.style.display = 'flex';
+
+  try {
+    const pathParts = filepath.split('/');
+    const encoded = pathParts.map(encodeURIComponent).join('/');
+    const text = await fetch(`${API}/agents/${currentAgentId}/reports/${encoded}`).then(r => r.text());
+    bodyEl.innerHTML = `<pre class="json-viewer">${highlightJson(text)}</pre>`;
+  } catch (e) {
+    bodyEl.innerHTML = '<div style="color:var(--danger);">読み込みエラー</div>';
+  }
 }
 
 function initReports() {
