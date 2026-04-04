@@ -944,9 +944,13 @@ async function renderFileDir(dirPath) {
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
       const d = new Date(f.mtime * 1000);
       const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      const meta = `${sizeStr} · ${dateStr}`;
+      const row2 = f.preview
+        ? `${escapeHtml(f.preview)} <span style="opacity:0.6;">— ${meta}</span>`
+        : meta;
       html += `<div class="file-entry ${cls}" data-path="${escapeHtml(f.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">${icon}</span><span class="file-entry-name">${escapeHtml(f.name)}</span></div>
-        <div class="file-entry-row2">${sizeStr} · ${dateStr}</div>
+        <div class="file-entry-row2">${row2}</div>
       </div>`;
     });
     entryList.innerHTML = html;

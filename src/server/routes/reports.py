@@ -51,13 +51,27 @@ def list_dir(
             elif entry.is_file():
                 try:
                     st = entry.stat()
+                    suffix = entry.suffix.lower()
+                    is_md = suffix == ".md"
+                    preview = ""
+                    if is_md:
+                        try:
+                            with entry.open(encoding="utf-8", errors="replace") as fh:
+                                for line in fh:
+                                    line = line.strip()
+                                    if line:
+                                        preview = line.lstrip("#").strip()
+                                        break
+                        except OSError:
+                            pass
                     files.append({
                         "name": entry.name,
                         "path": str(entry.relative_to(root)).replace("\\", "/"),
                         "size": st.st_size,
                         "mtime": st.st_mtime,
-                        "is_md": entry.suffix.lower() == ".md",
-                    "is_image": entry.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"},
+                        "is_md": is_md,
+                        "is_image": suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"},
+                        "preview": preview,
                     })
                 except OSError:
                     continue
