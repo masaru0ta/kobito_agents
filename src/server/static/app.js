@@ -929,9 +929,11 @@ async function renderFileDir(dirPath) {
 
     let html = '';
     dirs.forEach(d => {
+      const dd = new Date(d.mtime * 1000);
+      const ddStr = dd.toLocaleDateString('ja-JP') + ' ' + dd.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
       html += `<div class="file-entry dir" data-path="${escapeHtml(d.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(d.name)}</span></div>
-        <div class="file-entry-meta">フォルダ</div>
+        <div class="file-entry-meta">フォルダ · ${ddStr}</div>
       </div>`;
     });
     files.forEach(f => {

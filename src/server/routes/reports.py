@@ -47,7 +47,22 @@ def list_dir(
             if entry.is_dir():
                 if _is_excluded(entry.name):
                     continue
-                dirs.append({"name": entry.name, "path": str(entry.relative_to(root)).replace("\\", "/")})
+                latest = 0.0
+                try:
+                    for child in entry.iterdir():
+                        try:
+                            t = child.stat().st_mtime
+                            if t > latest:
+                                latest = t
+                        except OSError:
+                            pass
+                except OSError:
+                    pass
+                dirs.append({
+                    "name": entry.name,
+                    "path": str(entry.relative_to(root)).replace("\\", "/"),
+                    "mtime": latest or entry.stat().st_mtime,
+                })
             elif entry.is_file():
                 try:
                     st = entry.stat()
