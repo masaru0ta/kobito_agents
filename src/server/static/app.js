@@ -964,7 +964,7 @@ function renderFileDirEntries(data) {
     if (entry._type === 'dir') {
       html += `<div class="file-entry dir" data-path="${escapeHtml(entry.path)}">
         <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(entry.name)}</span></div>
-        <div class="file-entry-meta">フォルダ · 更新日 ${fmt(entry.mtime)}</div>
+        <div class="file-entry-meta">更新日 ${fmt(entry.mtime)}</div>
       </div>`;
     } else {
       const f = entry;
