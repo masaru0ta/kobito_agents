@@ -675,6 +675,9 @@ body {
 
 /* レポート */
 /* ファイルブラウザ */
+.file-sort-tab { color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 3px; }
+.file-sort-tab:hover { color: var(--text-primary); }
+.file-sort-tab.active { color: var(--accent); font-weight: 600; }
 .file-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 8px 10px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .file-breadcrumb-sep { margin: 0 2px; }
 .file-breadcrumb-item { cursor: pointer; color: var(--accent); padding: 2px 4px; border-radius: 3px; }

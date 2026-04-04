@@ -920,9 +920,9 @@ async function renderFileDir(dirPath) {
     el.addEventListener('click', () => renderFileDir(el.dataset.path));
   });
 
-  // ソートボタン更新
-  const sortBtn = document.getElementById('file-sort-btn');
-  if (sortBtn) sortBtn.textContent = fileBrowserSort === 'name' ? '名前順' : '更新順';
+  // ソートタブ更新
+  document.getElementById('file-sort-name')?.classList.toggle('active', fileBrowserSort === 'name');
+  document.getElementById('file-sort-mtime')?.classList.toggle('active', fileBrowserSort === 'mtime');
 
   try {
     const url = `${API}/agents/${currentAgentId}/reports?path=${encodeURIComponent(dirPath)}`;
@@ -1052,10 +1052,12 @@ function initReports() {
     document.getElementById('report-detail-pane').style.display = 'none';
     document.getElementById('report-list-view').style.display = 'flex';
   });
-  document.getElementById('file-sort-btn').addEventListener('click', () => {
-    fileBrowserSort = fileBrowserSort === 'name' ? 'mtime' : 'name';
-    document.getElementById('file-sort-btn').textContent = fileBrowserSort === 'name' ? '名前順' : '更新順';
-    if (fileBrowserCache) renderFileDirEntries(fileBrowserCache);
+  document.querySelectorAll('.file-sort-tab').forEach(el => {
+    el.addEventListener('click', () => {
+      fileBrowserSort = el.dataset.sort;
+      document.querySelectorAll('.file-sort-tab').forEach(t => t.classList.toggle('active', t.dataset.sort === fileBrowserSort));
+      if (fileBrowserCache) renderFileDirEntries(fileBrowserCache);
+    });
   });
 }
 
