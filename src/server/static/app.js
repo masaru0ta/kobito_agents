@@ -252,7 +252,7 @@ function renderSessions(sessions) {
     return `
       <div class="conversation-item${s.session_id === currentSessionId ? ' active' : ''}" data-session-id="${s.session_id}">
         <div class="conv-header">
-          <span class="conv-date">${date}</span>
+          <span class="conv-date">${date} 更新</span>
           <span class="conv-header-right">
             <span class="conv-count">(${s.message_count})</span>
           </span>
