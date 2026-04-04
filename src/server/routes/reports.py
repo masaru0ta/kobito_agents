@@ -68,8 +68,14 @@ def list_dir(
                     st = entry.stat()
                     suffix = entry.suffix.lower()
                     is_md = suffix == ".md"
+                    _CODE_SUFFIXES = {
+                        ".py", ".js", ".ts", ".jsx", ".tsx", ".css",
+                        ".sh", ".bash", ".yaml", ".yml", ".toml", ".txt",
+                        ".go", ".rs", ".java", ".cpp", ".c", ".h", ".rb", ".php",
+                    }
+                    is_code = suffix in _CODE_SUFFIXES
                     preview = ""
-                    if is_md:
+                    if is_md or is_code:
                         try:
                             with entry.open(encoding="utf-8", errors="replace") as fh:
                                 first = True
@@ -80,8 +86,11 @@ def list_dir(
                                     if first and line == "---":
                                         first = False
                                         continue
-                                    preview = line.lstrip("#").strip()
-                                    break
+                                    # コメント記号・shebang・記号のみ行はスキップ
+                                    clean = line.lstrip("#!/*-").strip()
+                                    if clean:
+                                        preview = clean
+                                        break
                         except OSError:
                             pass
                     files.append({
@@ -92,11 +101,7 @@ def list_dir(
                         "is_md": is_md,
                         "is_image": suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"},
                         "is_json": suffix == ".json",
-                        "is_code": suffix in {
-                            ".py", ".js", ".ts", ".jsx", ".tsx", ".css",
-                            ".sh", ".bash", ".yaml", ".yml", ".toml", ".txt",
-                            ".go", ".rs", ".java", ".cpp", ".c", ".h", ".rb", ".php",
-                        },
+                        "is_code": is_code,
                         "preview": preview,
                     })
                 except OSError:
