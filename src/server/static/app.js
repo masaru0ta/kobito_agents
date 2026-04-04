@@ -890,10 +890,13 @@ function switchTab(tabName) {
 // ファイルブラウザ
 // ============================================================
 
-let fileBrowserPath = '';  // 現在表示中のディレクトリパス（ルートからの相対）
+let fileBrowserPath = '';   // 現在表示中のディレクトリパス（ルートからの相対）
+let fileBrowserSort = 'name';  // 'name' | 'mtime'
+let fileBrowserCache = null;   // 最後にフェッチしたディレクトリデータ
 
 async function loadReports() {
   fileBrowserPath = '';
+  fileBrowserCache = null;
   await renderFileDir('');
 }
 
@@ -917,26 +920,54 @@ async function renderFileDir(dirPath) {
     el.addEventListener('click', () => renderFileDir(el.dataset.path));
   });
 
+  // ソートボタン更新
+  const sortBtn = document.getElementById('file-sort-btn');
+  if (sortBtn) sortBtn.textContent = fileBrowserSort === 'name' ? '名前順' : '更新順';
+
   try {
     const url = `${API}/agents/${currentAgentId}/reports?path=${encodeURIComponent(dirPath)}`;
     const data = await fetch(url).then(r => r.json());
-    const { dirs, files } = data;
+    fileBrowserCache = data;
+    renderFileDirEntries(data);
 
-    if (!dirs.length && !files.length) {
-      entryList.innerHTML = '<div style="padding:8px; color:var(--text-muted); font-size:13px;">空のディレクトリ</div>';
-      return;
-    }
+    renderFileDirEntries(data);
+  } catch (e) {
+    entryList.innerHTML = '<div style="padding:8px; color:var(--danger); font-size:13px;">読み込みエラー</div>';
+  }
+}
 
-    let html = '';
-    dirs.forEach(d => {
-      const dd = new Date(d.mtime * 1000);
-      const ddStr = dd.toLocaleDateString('ja-JP') + ' ' + dd.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-      html += `<div class="file-entry dir" data-path="${escapeHtml(d.path)}">
-        <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(d.name)}</span></div>
-        <div class="file-entry-meta">フォルダ · 更新日 ${ddStr}</div>
+function renderFileDirEntries(data) {
+  const entryList = document.getElementById('file-entry-list');
+  let { dirs, files } = data;
+
+  if (!dirs.length && !files.length) {
+    entryList.innerHTML = '<div style="padding:8px; color:var(--text-muted); font-size:13px;">空のディレクトリ</div>';
+    return;
+  }
+
+  const fmt = ts => {
+    const d = new Date(ts * 1000);
+    return d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const orderedAll = [
+    ...dirs.map(d => ({ ...d, _type: 'dir' })),
+    ...files.map(f => ({ ...f, _type: 'file' })),
+  ];
+  if (fileBrowserSort === 'mtime') {
+    orderedAll.sort((a, b) => b.mtime - a.mtime);
+  }
+
+  let html = '';
+
+  orderedAll.forEach(entry => {
+    if (entry._type === 'dir') {
+      html += `<div class="file-entry dir" data-path="${escapeHtml(entry.path)}">
+        <div class="file-entry-row1"><span class="file-entry-icon">📁</span><span class="file-entry-name">${escapeHtml(entry.name)}</span></div>
+        <div class="file-entry-meta">フォルダ · 更新日 ${fmt(entry.mtime)}</div>
       </div>`;
-    });
-    files.forEach(f => {
+    } else {
+      const f = entry;
       const isMd = f.is_md;
       const isImage = f.is_image;
       const ext = f.name.split('.').pop().toLowerCase();
@@ -944,9 +975,7 @@ async function renderFileDir(dirPath) {
       const cls = isMd ? 'file-md' : isImage ? 'file-img' : isHtml ? 'file-html' : 'file-other';
       const icon = isMd ? '📄' : isImage ? '🖼️' : isHtml ? '🌐' : '🔒';
       const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
-      const d = new Date(f.mtime * 1000);
-      const dateStr = d.toLocaleDateString('ja-JP') + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-      const meta = `${sizeStr} · 更新日 ${dateStr}`;
+      const meta = `${sizeStr} · 更新日 ${fmt(f.mtime)}`;
       const row2 = f.preview
         ? `<div class="file-entry-preview">${escapeHtml(f.preview)}</div><div class="file-entry-meta">${meta}</div>`
         : `<div class="file-entry-meta">${meta}</div>`;
@@ -954,28 +983,26 @@ async function renderFileDir(dirPath) {
         <div class="file-entry-row1"><span class="file-entry-icon">${icon}</span><span class="file-entry-name">${escapeHtml(f.name)}</span></div>
         ${row2}
       </div>`;
-    });
-    entryList.innerHTML = html;
+    }
+  });
+  entryList.innerHTML = html;
 
-    entryList.querySelectorAll('.file-entry.dir').forEach(el => {
-      el.addEventListener('click', () => renderFileDir(el.dataset.path));
+  entryList.querySelectorAll('.file-entry.dir').forEach(el => {
+    el.addEventListener('click', () => renderFileDir(el.dataset.path));
+  });
+  entryList.querySelectorAll('.file-entry.file-md').forEach(el => {
+    el.addEventListener('click', () => openReport(el.dataset.path));
+  });
+  entryList.querySelectorAll('.file-entry.file-img').forEach(el => {
+    el.addEventListener('click', () => openImageFile(el.dataset.path));
+  });
+  entryList.querySelectorAll('.file-entry.file-html').forEach(el => {
+    el.addEventListener('click', () => {
+      const pathParts = el.dataset.path.split('/');
+      const encoded = pathParts.map(encodeURIComponent).join('/');
+      window.open(`${API}/agents/${currentAgentId}/reports/${encoded}`, '_blank');
     });
-    entryList.querySelectorAll('.file-entry.file-md').forEach(el => {
-      el.addEventListener('click', () => openReport(el.dataset.path));
-    });
-    entryList.querySelectorAll('.file-entry.file-img').forEach(el => {
-      el.addEventListener('click', () => openImageFile(el.dataset.path));
-    });
-    entryList.querySelectorAll('.file-entry.file-html').forEach(el => {
-      el.addEventListener('click', () => {
-        const pathParts = el.dataset.path.split('/');
-        const encoded = pathParts.map(encodeURIComponent).join('/');
-        window.open(`${API}/agents/${currentAgentId}/reports/${encoded}`, '_blank');
-      });
-    });
-  } catch (e) {
-    entryList.innerHTML = '<div style="padding:8px; color:var(--danger); font-size:13px;">読み込みエラー</div>';
-  }
+  });
 }
 
 async function openReport(filepath) {
@@ -1024,6 +1051,11 @@ function initReports() {
   document.getElementById('report-back-btn').addEventListener('click', () => {
     document.getElementById('report-detail-pane').style.display = 'none';
     document.getElementById('report-list-view').style.display = 'flex';
+  });
+  document.getElementById('file-sort-btn').addEventListener('click', () => {
+    fileBrowserSort = fileBrowserSort === 'name' ? 'mtime' : 'name';
+    document.getElementById('file-sort-btn').textContent = fileBrowserSort === 'name' ? '名前順' : '更新順';
+    if (fileBrowserCache) renderFileDirEntries(fileBrowserCache);
   });
 }
 
