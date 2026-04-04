@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from server.config import AgentInfo, AgentNotFoundError
+from server.config import AgentInfo, AgentNotFoundError, DuplicatePathError, SystemAgentProtectedError
 from server.session_reader import SessionSummary, SessionMessage
 
 
@@ -181,3 +181,94 @@ class TestSessionsAPI:
             resp = client.post("/api/agents/system/cli", json={"session_id": "sess-001"})
 
         assert resp.status_code == 200
+
+
+class TestAgentsAddAPI:
+    """POST /api/agents — エージェント追加"""
+
+    def test_エージェントを追加できる(self, mock_app):
+        app, mock_config, _, _ = mock_app
+        mock_config.add_agent.return_value = AgentInfo(
+            id="agent_20260404_143000_x7k", name="キャスパー", path="/tmp/game",
+            description="ゲームデザイナー", cli="claude", model_tier="deep", system_prompt="",
+        )
+
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={
+                "name": "キャスパー",
+                "path": "/tmp/game",
+                "description": "ゲームデザイナー",
+                "cli": "claude",
+                "model_tier": "deep",
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == "agent_20260404_143000_x7k"
+        assert data["name"] == "キャスパー"
+        mock_config.add_agent.assert_called_once_with(
+            name="キャスパー", path="/tmp/game", description="ゲームデザイナー",
+            cli="claude", model_tier="deep",
+        )
+
+    def test_バリデーションエラーで400(self, mock_app):
+        app, mock_config, _, _ = mock_app
+        mock_config.add_agent.side_effect = ValueError("name は空にできません")
+
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={
+                "name": "",
+                "path": "/tmp/game",
+                "description": "",
+                "cli": "claude",
+                "model_tier": "deep",
+            })
+
+        assert resp.status_code == 400
+
+    def test_重複pathで409(self, mock_app):
+        app, mock_config, _, _ = mock_app
+        mock_config.add_agent.side_effect = DuplicatePathError("パス '/tmp' は既に登録されています")
+
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={
+                "name": "重複",
+                "path": "/tmp",
+                "description": "",
+                "cli": "claude",
+                "model_tier": "deep",
+            })
+
+        assert resp.status_code == 409
+
+
+class TestAgentsDeleteAPI:
+    """DELETE /api/agents/{id} — エージェント削除"""
+
+    def test_エージェントを削除できる(self, mock_app):
+        app, mock_config, _, _ = mock_app
+        mock_config.delete_agent.return_value = None
+
+        with TestClient(app) as client:
+            resp = client.delete("/api/agents/agent_20260404_143000_x7k")
+
+        assert resp.status_code == 200
+        mock_config.delete_agent.assert_called_once_with("agent_20260404_143000_x7k")
+
+    def test_systemエージェント削除で403(self, mock_app):
+        app, mock_config, _, _ = mock_app
+        mock_config.delete_agent.side_effect = SystemAgentProtectedError("systemエージェントは削除できません")
+
+        with TestClient(app) as client:
+            resp = client.delete("/api/agents/system")
+
+        assert resp.status_code == 403
+
+    def test_存在しないエージェント削除で404(self, mock_app):
+        app, mock_config, _, _ = mock_app
+        mock_config.delete_agent.side_effect = AgentNotFoundError("not found")
+
+        with TestClient(app) as client:
+            resp = client.delete("/api/agents/nonexistent")
+
+        assert resp.status_code == 404

@@ -860,6 +860,10 @@ async function loadSettingsData() {
   const promptResp = await fetch(`${API}/agents/${currentAgentId}/system-prompt`);
   const promptData = await promptResp.json();
   document.querySelector('[data-field="system-prompt"]').value = promptData.content || '';
+
+  // systemエージェント以外のとき登録解除ボタンを表示
+  const dangerZone = document.getElementById('danger-zone');
+  dangerZone.style.display = currentAgentId === 'system' ? 'none' : 'block';
 }
 
 async function loadSchedulerLogs() {
@@ -959,6 +963,24 @@ function initActions() {
         model_tier: document.querySelector('[data-field="model_tier"]').value,
       }),
     });
+    await loadAgents();
+  });
+
+  // エージェント追加フォーム
+  initAddAgent();
+
+  // エージェント登録解除
+  document.getElementById('delete-agent-btn').addEventListener('click', async () => {
+    if (!currentAgentId || currentAgentId === 'system') return;
+    const agent = agents.find(a => a.id === currentAgentId);
+    const name = agent ? agent.name : currentAgentId;
+    if (!confirm(`エージェント "${name}" の登録を解除しますか？\nプロジェクトデータは削除されません。`)) return;
+    const resp = await fetch(`${API}/agents/${currentAgentId}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast(err.detail || 'エラーが発生しました');
+      return;
+    }
     await loadAgents();
   });
 
@@ -1552,6 +1574,9 @@ function initScheduler() {
 
   const btn = document.getElementById('scheduler-toggle-btn');
   btn.addEventListener('click', async () => {
+    const label = document.getElementById('scheduler-label').textContent;
+    const next = label === 'ON' ? 'OFF' : 'ON';
+    if (!confirm(`スケジューラーを${next}にしますか？`)) return;
     try {
       const resp = await fetch(`${API}/scheduler/toggle`, { method: 'POST' });
       if (resp.ok) {
@@ -1592,4 +1617,66 @@ function updateSchedulerUI(data) {
     indicator.classList.add('off');
     label.textContent = 'OFF';
   }
+}
+
+// ============================================================
+// エージェント追加
+// ============================================================
+
+function initAddAgent() {
+  const pane = document.getElementById('add-agent-pane');
+  const openBtn = document.getElementById('add-agent-btn');
+  const cancelBtn = document.getElementById('add-agent-cancel-btn');
+  const cancelBtn2 = document.getElementById('add-agent-cancel-btn2');
+  const submitBtn = document.getElementById('add-agent-submit-btn');
+
+  function openForm() {
+    // フォームをリセット
+    document.getElementById('add-agent-name').value = '';
+    document.getElementById('add-agent-path').value = '';
+    document.getElementById('add-agent-description').value = '';
+    document.getElementById('add-agent-cli').value = 'claude';
+    document.getElementById('add-agent-model-tier').value = 'deep';
+    pane.style.display = 'flex';
+  }
+
+  function closeForm() {
+    pane.style.display = 'none';
+  }
+
+  openBtn.addEventListener('click', openForm);
+  cancelBtn.addEventListener('click', closeForm);
+  cancelBtn2.addEventListener('click', closeForm);
+
+  submitBtn.addEventListener('click', async () => {
+    const name = document.getElementById('add-agent-name').value.trim();
+    const path = document.getElementById('add-agent-path').value.trim();
+    const description = document.getElementById('add-agent-description').value.trim();
+    const cli = document.getElementById('add-agent-cli').value;
+    const model_tier = document.getElementById('add-agent-model-tier').value;
+
+    if (!name || !path) {
+      showToast('名前とプロジェクトパスは必須です');
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path, description, cli, model_tier }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        showToast(err.detail || 'エラーが発生しました');
+        return;
+      }
+      const newAgent = await resp.json();
+      closeForm();
+      await loadAgents();
+      selectAgent(newAgent.id);
+    } catch (e) {
+      showToast('通信エラーが発生しました');
+    }
+  });
 }

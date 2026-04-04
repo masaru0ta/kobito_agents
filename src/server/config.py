@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import random
+import string
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -19,6 +22,14 @@ class AgentInfo(BaseModel):
 
 
 class AgentNotFoundError(Exception):
+    pass
+
+
+class DuplicatePathError(Exception):
+    pass
+
+
+class SystemAgentProtectedError(Exception):
     pass
 
 
@@ -94,6 +105,61 @@ class ConfigManager:
                     system_prompt=self._read_system_prompt(agent["path"]),
                 )
         raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
+
+    def _generate_agent_id(self) -> str:
+        """agent_{YYYYMMDDHHmmss}_{ランダム3文字} 形式のIDを生成"""
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=3))
+        return f"agent_{ts}_{suffix}"
+
+    def add_agent(
+        self, name: str, path: str, description: str, cli: str, model_tier: str
+    ) -> AgentInfo:
+        """エージェントを新規登録する"""
+        # バリデーション
+        if not name:
+            raise ValueError("name は空にできません")
+        if not path or not Path(path).is_dir():
+            raise ValueError("path は実在するディレクトリを指定してください")
+        if cli not in ("claude", "codex"):
+            raise ValueError("cli は 'claude' または 'codex' を指定してください")
+        if model_tier not in ("deep", "quick"):
+            raise ValueError("model_tier は 'deep' または 'quick' を指定してください")
+
+        # 同一path重複チェック
+        agents = self._read_agents()
+        for agent in agents:
+            if agent["path"] == path:
+                raise DuplicatePathError(f"パス '{path}' は既に登録されています")
+
+        new_agent = {
+            "id": self._generate_agent_id(),
+            "name": name,
+            "path": path,
+            "description": description,
+            "cli": cli,
+            "model_tier": model_tier,
+        }
+        agents.append(new_agent)
+        self._write_agents(agents)
+
+        return AgentInfo(
+            **new_agent,
+            system_prompt=self._read_system_prompt(path),
+        )
+
+    def delete_agent(self, agent_id: str) -> None:
+        """エージェントの登録を解除する（systemは削除不可）"""
+        if agent_id == "system":
+            raise SystemAgentProtectedError("systemエージェントは削除できません")
+
+        agents = self._read_agents()
+        new_agents = [a for a in agents if a["id"] != agent_id]
+
+        if len(new_agents) == len(agents):
+            raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
+
+        self._write_agents(new_agents)
 
     def get_system_prompt(self, agent_id: str) -> str:
         agent = self.get_agent(agent_id)

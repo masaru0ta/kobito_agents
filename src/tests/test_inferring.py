@@ -22,6 +22,7 @@ from server.cli_bridge import (
     ManagedProcess,
     _pid_dir,
     _has_api_connection,
+    _judge_inferring,
     _remove_pid_file,
     _write_pid_file,
     cleanup_orphaned_processes,
@@ -51,6 +52,7 @@ def _make_managed_process(
     session_id: str = "sess-001",
     project_path: str = "",
     model: str = "opus",
+    message_sent_at: float = 1.0,
 ) -> ManagedProcess:
     """テスト用ManagedProcessをモックで作成する"""
     proc = MagicMock()
@@ -65,6 +67,9 @@ def _make_managed_process(
     mp.model = model
     mp.project_path = project_path
     mp.last_used = 0
+    mp.message_sent_at = message_sent_at
+    mp.last_seen_jsonl_mtime = 0.0
+    mp.last_mtime_change_at = 0.0
     mp._loop = None
     return mp
 
@@ -154,7 +159,7 @@ class TestHasApiConnection:
     def test_port443にESTABLISHED接続があればTrue(self):
         mock_proc = MagicMock()
         mock_proc.children.return_value = []
-        mock_proc.net_connections.return_value = [
+        mock_proc.connections.return_value = [
             ConnInfo(raddr=ConnAddr("1.2.3.4", 443), status="ESTABLISHED"),
         ]
         with patch("server.cli_bridge.psutil.Process", return_value=mock_proc):
@@ -163,7 +168,7 @@ class TestHasApiConnection:
     def test_port443以外の接続ではFalse(self):
         mock_proc = MagicMock()
         mock_proc.children.return_value = []
-        mock_proc.net_connections.return_value = [
+        mock_proc.connections.return_value = [
             ConnInfo(raddr=ConnAddr("1.2.3.4", 80), status="ESTABLISHED"),
         ]
         with patch("server.cli_bridge.psutil.Process", return_value=mock_proc):
@@ -172,14 +177,14 @@ class TestHasApiConnection:
     def test_接続がなければFalse(self):
         mock_proc = MagicMock()
         mock_proc.children.return_value = []
-        mock_proc.net_connections.return_value = []
+        mock_proc.connections.return_value = []
         with patch("server.cli_bridge.psutil.Process", return_value=mock_proc):
             assert _has_api_connection(1000) is False
 
     def test_ESTABLISHED以外のステータスではFalse(self):
         mock_proc = MagicMock()
         mock_proc.children.return_value = []
-        mock_proc.net_connections.return_value = [
+        mock_proc.connections.return_value = [
             ConnInfo(raddr=ConnAddr("1.2.3.4", 443), status="TIME_WAIT"),
         ]
         with patch("server.cli_bridge.psutil.Process", return_value=mock_proc):
@@ -188,10 +193,10 @@ class TestHasApiConnection:
     def test_子プロセスの接続も検査する(self):
 
         mock_parent = MagicMock()
-        mock_parent.net_connections.return_value = []
+        mock_parent.connections.return_value = []
 
         mock_child = MagicMock()
-        mock_child.net_connections.return_value = [
+        mock_child.connections.return_value = [
             ConnInfo(raddr=ConnAddr("1.2.3.4", 443), status="ESTABLISHED"),
         ]
         mock_parent.children.return_value = [mock_child]
@@ -213,10 +218,10 @@ class TestHasApiConnection:
         import psutil as _psutil
 
         mock_child = MagicMock()
-        mock_child.net_connections.side_effect = _psutil.AccessDenied(2000)
+        mock_child.connections.side_effect = _psutil.AccessDenied(2000)
 
         mock_parent = MagicMock()
-        mock_parent.net_connections.return_value = [
+        mock_parent.connections.return_value = [
             ConnInfo(raddr=ConnAddr("1.2.3.4", 443), status="ESTABLISHED"),
         ]
         mock_parent.children.return_value = [mock_child]
@@ -227,7 +232,7 @@ class TestHasApiConnection:
     def test_raddrがNoneの接続は無視する(self):
         mock_proc = MagicMock()
         mock_proc.children.return_value = []
-        mock_proc.net_connections.return_value = [
+        mock_proc.connections.return_value = [
             ConnInfo(raddr=None, status="LISTEN"),
         ]
         with patch("server.cli_bridge.psutil.Process", return_value=mock_proc):
@@ -250,7 +255,7 @@ class TestCleanupOrphanedProcesses:
         project = str(tmp_path)
         _make_pid_file(project, "sess-dead", 99999)
 
-        with patch("server.cli_bridge.os.kill", side_effect=OSError("No such process")):
+        with patch("server.pid_manager.is_process_alive", return_value=False):
             cleanup_orphaned_processes(project)
 
         assert not _pid_file_path(project, "sess-dead").exists()
@@ -259,16 +264,14 @@ class TestCleanupOrphanedProcesses:
         project = str(tmp_path)
         _make_pid_file(project, "sess-idle", 5000)
 
-        mock_psutil_proc = MagicMock()
-
         with (
-            patch("server.cli_bridge.os.kill"),  # 生存確認成功
+            patch("server.pid_manager.is_process_alive", return_value=True),
             patch("server.cli_bridge._has_api_connection", return_value=False),
-            patch("server.cli_bridge.psutil.Process", return_value=mock_psutil_proc),
+            patch("server.pid_manager.terminate_process") as mock_terminate,
         ):
             cleanup_orphaned_processes(project)
 
-        mock_psutil_proc.terminate.assert_called_once()
+        mock_terminate.assert_called_once_with(5000)
         assert not _pid_file_path(project, "sess-idle").exists()
 
     def test_生存_推論中のプロセスは残す(self, tmp_path):
@@ -276,7 +279,7 @@ class TestCleanupOrphanedProcesses:
         _make_pid_file(project, "sess-inferring", 6000)
 
         with (
-            patch("server.cli_bridge.os.kill"),  # 生存確認成功
+            patch("server.pid_manager.is_process_alive", return_value=True),
             patch("server.cli_bridge._has_api_connection", return_value=True),
         ):
             cleanup_orphaned_processes(project)
@@ -301,19 +304,16 @@ class TestCleanupOrphanedProcesses:
         _make_pid_file(project, "sess-dead", 1002)
         _make_pid_file(project, "sess-inferring", 1003)
 
-        def kill_side_effect(pid, sig):
-            if pid == 1002:
-                raise OSError("No such process")
+        def alive_side_effect(pid):
+            return pid != 1002  # 1002は死亡
 
         def api_conn_side_effect(pid):
             return pid == 1003  # 1003のみ推論中
 
-        mock_psutil_proc = MagicMock()
-
         with (
-            patch("server.cli_bridge.os.kill", side_effect=kill_side_effect),
+            patch("server.pid_manager.is_process_alive", side_effect=alive_side_effect),
             patch("server.cli_bridge._has_api_connection", side_effect=api_conn_side_effect),
-            patch("server.cli_bridge.psutil.Process", return_value=mock_psutil_proc),
+            patch("server.pid_manager.terminate_process") as mock_terminate,
         ):
             cleanup_orphaned_processes(project)
 
@@ -321,6 +321,7 @@ class TestCleanupOrphanedProcesses:
         assert not _pid_file_path(project, "sess-dead").exists()
         # 生存+推論終了(1001) → terminate + PIDファイル削除
         assert not _pid_file_path(project, "sess-alive").exists()
+        mock_terminate.assert_called_once_with(1001)
         # 生存+推論中(1003) → 残す
         assert _pid_file_path(project, "sess-inferring").exists()
 
@@ -403,7 +404,7 @@ class TestInferringSessionIds:
         _make_pid_file(project, "sess-orphan", 9000)
 
         with (
-            patch("server.cli_bridge.os.kill"),  # 生存確認成功
+            patch("server.cli_bridge.is_process_alive", return_value=True),
             patch("server.cli_bridge._has_api_connection", return_value=True),
         ):
             result = bridge.inferring_session_ids(project)
@@ -415,17 +416,16 @@ class TestInferringSessionIds:
         bridge = CLIBridge()
 
         _make_pid_file(project, "sess-orphan", 9000)
-        mock_psutil_proc = MagicMock()
 
         with (
-            patch("server.cli_bridge.os.kill"),
+            patch("server.cli_bridge.is_process_alive", return_value=True),
             patch("server.cli_bridge._has_api_connection", return_value=False),
-            patch("server.cli_bridge.psutil.Process", return_value=mock_psutil_proc),
+            patch("server.cli_bridge.terminate_process") as mock_terminate,
         ):
             result = bridge.inferring_session_ids(project)
 
         assert result == []
-        mock_psutil_proc.terminate.assert_called_once()
+        mock_terminate.assert_called_once_with(9000)
         assert not _pid_file_path(project, "sess-orphan").exists()
 
     def test_PIDファイルの死亡プロセスはPIDファイルを削除して返さない(self, tmp_path):
@@ -434,7 +434,7 @@ class TestInferringSessionIds:
 
         _make_pid_file(project, "sess-dead", 9000)
 
-        with patch("server.cli_bridge.os.kill", side_effect=OSError("No such process")):
+        with patch("server.cli_bridge.is_process_alive", return_value=False):
             result = bridge.inferring_session_ids(project)
 
         assert result == []
@@ -477,7 +477,7 @@ class TestInferringSessionIds:
 
         with (
             patch("server.cli_bridge._has_api_connection", return_value=True),
-            patch("server.cli_bridge.os.kill"),  # 孤児の生存確認成功
+            patch("server.cli_bridge.is_process_alive", return_value=True),
         ):
             result = bridge.inferring_session_ids(project)
 
@@ -551,6 +551,50 @@ class TestShutdown:
             await bridge.shutdown()
 
         mock_task.cancel.assert_called_once()
+
+
+# ============================================================
+# 推論判定ロジック (_judge_inferring)
+# ============================================================
+
+class TestJudgeInferring:
+    """_judge_inferring: ロジック表に基づく推論中判定"""
+
+    def test_未送信なら推論中ではない(self):
+        assert _judge_inferring(
+            awaiting_response=False, has_connection=True,
+            jsonl_updated=False, last_role=None, jsonl_stable=False,
+        ) is False
+
+    def test_TCP切れなら推論完了(self):
+        assert _judge_inferring(
+            awaiting_response=True, has_connection=False,
+            jsonl_updated=False, last_role=None, jsonl_stable=False,
+        ) is False
+
+    def test_接続中_JSONL未更新なら推論中(self):
+        assert _judge_inferring(
+            awaiting_response=True, has_connection=True,
+            jsonl_updated=False, last_role=None, jsonl_stable=False,
+        ) is True
+
+    def test_接続中_JSONL末尾userなら推論中(self):
+        assert _judge_inferring(
+            awaiting_response=True, has_connection=True,
+            jsonl_updated=True, last_role="user", jsonl_stable=True,
+        ) is True
+
+    def test_接続中_JSONL末尾assistant_未安定なら推論中(self):
+        assert _judge_inferring(
+            awaiting_response=True, has_connection=True,
+            jsonl_updated=True, last_role="assistant", jsonl_stable=False,
+        ) is True
+
+    def test_接続中_JSONL末尾assistant_安定なら推論完了(self):
+        assert _judge_inferring(
+            awaiting_response=True, has_connection=True,
+            jsonl_updated=True, last_role="assistant", jsonl_stable=True,
+        ) is False
 
 
 # ============================================================

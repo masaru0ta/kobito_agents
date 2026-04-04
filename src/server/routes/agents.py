@@ -3,10 +3,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from server.config import AgentNotFoundError, ConfigManager
+from server.config import AgentNotFoundError, ConfigManager, DuplicatePathError, SystemAgentProtectedError
 from server.routes.deps import get_config_manager
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+
+class AgentCreateRequest(BaseModel):
+    name: str
+    path: str
+    description: str = ""
+    cli: str = "claude"
+    model_tier: str = "deep"
 
 
 class AgentUpdateRequest(BaseModel):
@@ -29,6 +37,34 @@ def list_agents(config: ConfigManager = Depends(get_config_manager)):
         }
         for a in agents
     ]
+
+
+@router.post("")
+def create_agent(body: AgentCreateRequest, config: ConfigManager = Depends(get_config_manager)):
+    try:
+        a = config.add_agent(
+            name=body.name, path=body.path, description=body.description,
+            cli=body.cli, model_tier=body.model_tier,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except DuplicatePathError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "id": a.id, "name": a.name, "path": a.path,
+        "description": a.description, "cli": a.cli, "model_tier": a.model_tier,
+    }
+
+
+@router.delete("/{agent_id}")
+def delete_agent(agent_id: str, config: ConfigManager = Depends(get_config_manager)):
+    try:
+        config.delete_agent(agent_id)
+    except SystemAgentProtectedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "ok"}
 
 
 @router.get("/{agent_id}")

@@ -27,6 +27,27 @@ def _count_checkboxes(body: str) -> tuple[int, int]:
     return checked, total
 
 
+def _extract_checked_steps(body: str) -> set[str]:
+    """チェック済みステップのテキスト集合を返す"""
+    return {
+        m.group(1).strip()
+        for m in re.finditer(r"- \[x\]\s*(.+)", body, re.IGNORECASE)
+    }
+
+
+def _diff_completed_steps(body_before: str, body_after: str) -> list[str]:
+    """新たに完了したステップのテキストリストを返す"""
+    before = _extract_checked_steps(body_before)
+    after = _extract_checked_steps(body_after)
+    return sorted(after - before)
+
+
+def _first_unchecked_step(body: str) -> str | None:
+    """最初の未完了ステップのテキストを返す"""
+    m = re.search(r"- \[ \]\s*(.+)", body)
+    return m.group(1).strip() if m else None
+
+
 class Scheduler:
     """タスク自動実行スケジューラー
 
@@ -66,6 +87,7 @@ class Scheduler:
         if self._loop_task is None or self._loop_task.done():
             if self.enabled:
                 self.next_run = datetime.now(timezone.utc) + timedelta(seconds=self._interval)
+                asyncio.create_task(self.tick())
             self._loop_task = asyncio.create_task(self.run_loop())
             logger.info("スケジューラー タイマーループ開始")
 
@@ -92,6 +114,8 @@ class Scheduler:
         self.enabled = not self.enabled
         if self.enabled:
             self.next_run = datetime.now(timezone.utc) + timedelta(seconds=self._interval)
+            # ONにした瞬間に即時実行
+            asyncio.create_task(self.tick())
         else:
             self.next_run = None
         self._config_manager.set_setting("scheduler_enabled", self.enabled)
@@ -221,12 +245,16 @@ class Scheduler:
             "timestamp": started_at.isoformat(),
             "task_id": task_id,
             "task_title": "",
+            "agent_id": agent.id,
+            "agent_name": agent.name,
             "session_id": None,
             "checked_before": 0,
             "total_before": 0,
             "checked_after": 0,
             "total_after": 0,
             "progress_changed": False,
+            "completed_steps": [],
+            "current_step": None,
             "error": None,
         }
         try:
@@ -238,6 +266,7 @@ class Scheduler:
             checked_before, total_before = _count_checkboxes(task.body)
             log_entry["checked_before"] = checked_before
             log_entry["total_before"] = total_before
+            log_entry["current_step"] = _first_unchecked_step(task.body)
 
             # タスクコンテキスト注入
             context = build_task_context(task, "work")
@@ -269,12 +298,14 @@ class Scheduler:
                             )
                     break
 
-            # 実行後チェックボックス集計
+            # 実行後チェックボックス集計・差分
             task_after = tm.get_task(task_id)
             checked_after, total_after = _count_checkboxes(task_after.body)
+            completed = _diff_completed_steps(task.body, task_after.body)
             log_entry["checked_after"] = checked_after
             log_entry["total_after"] = total_after
-            log_entry["progress_changed"] = checked_after != checked_before
+            log_entry["progress_changed"] = bool(completed)
+            log_entry["completed_steps"] = completed
 
         except Exception as e:
             log_entry["error"] = str(e)

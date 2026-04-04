@@ -6,7 +6,6 @@ import asyncio
 import atexit
 import json
 import logging
-import os
 import shutil
 import subprocess
 import threading
@@ -16,6 +15,16 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 import psutil
+
+from server.pid_manager import (
+    cleanup_orphaned_processes as _cleanup_orphaned,
+    is_process_alive,
+    iter_pid_files,
+    pid_dir as _pid_dir,
+    remove_pid_file as _remove_pid_file,
+    terminate_process,
+    write_pid_file as _write_pid_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,36 +129,6 @@ def _jsonl_info(project_path: str, session_id: str) -> tuple[str | None, float]:
 
 
 # ============================================================
-# PID ファイル管理
-# ============================================================
-
-def _pid_dir(project_path: str) -> Path:
-    """PID ファイル置き場: {project}/.kobito/alive/"""
-    pid_dir = Path(project_path) / ".kobito" / "alive"
-    pid_dir.mkdir(parents=True, exist_ok=True)
-    return pid_dir
-
-
-def _write_pid_file(project_path: str, session_id: str, pid: int) -> None:
-    """プロセス起動時に PID を記録する"""
-    if not session_id or session_id.startswith("new-"):
-        return
-    path = _pid_dir(project_path) / f"{session_id}.pid"
-    path.write_text(str(pid), encoding="utf-8")
-
-
-def _remove_pid_file(project_path: str, session_id: str) -> None:
-    """プロセス終了時に PID ファイルを削除する"""
-    if not session_id:
-        return
-    path = _pid_dir(project_path) / f"{session_id}.pid"
-    try:
-        path.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-# ============================================================
 # 推論中判定（TCP コネクション検査）
 # ============================================================
 
@@ -173,31 +152,40 @@ def _has_api_connection(pid: int) -> bool:
 
 
 def cleanup_orphaned_processes(project_path: str) -> None:
-    """サーバー起動時に呼ぶ。PID ファイルから孤児プロセスを検出し、
-    推論が終わっているものは kill してクリーンアップする。"""
-    pid_dir = Path(project_path) / ".kobito" / "alive"
-    if not pid_dir.exists():
-        return
-    for pid_file in pid_dir.glob("*.pid"):
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-            os.kill(pid, 0)  # 生存確認
-            if not _has_api_connection(pid):
-                # 推論終了済み → kill
-                try:
-                    psutil.Process(pid).terminate()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-                pid_file.unlink(missing_ok=True)
-                logger.info(f"孤児プロセス終了: PID={pid} session={pid_file.stem}")
-            else:
-                logger.info(f"孤児プロセス推論中: PID={pid} session={pid_file.stem}")
-        except (OSError, ValueError):
-            # プロセスが既に死んでいる or 不正ファイル
-            try:
-                pid_file.unlink(missing_ok=True)
-            except Exception:
-                pass
+    """サーバー起動時に呼ぶ。孤児プロセスのクリーンアップ。"""
+    _cleanup_orphaned(project_path, _has_api_connection)
+
+
+def _judge_inferring(
+    awaiting_response: bool,
+    has_connection: bool,
+    jsonl_updated: bool,
+    last_role: str | None,
+    jsonl_stable: bool,
+) -> bool:
+    """推論中かどうかを判定する共通ロジック。
+
+    ロジック表:
+    | 送信済 | TCP接続 | JSONL更新(送信後) | JSONL末尾  | JSONL安定(3秒) | 判定   |
+    |--------|---------|-----------------|-----------|---------------|--------|
+    | No     | -       | -               | -         | -             | 待機   |
+    | Yes    | 切れ    | -               | -         | -             | 完了   |
+    | Yes    | 接続中  | No              | -         | -             | 推論中 |
+    | Yes    | 接続中  | Yes             | user      | -             | 推論中 |
+    | Yes    | 接続中  | Yes             | assistant | No            | 推論中 |
+    | Yes    | 接続中  | Yes             | assistant | Yes           | 完了   |
+    """
+    if not awaiting_response:
+        return False
+    if not has_connection:
+        return False
+    if not jsonl_updated:
+        return True
+    if last_role != "assistant":
+        return True
+    if not jsonl_stable:
+        return True
+    return False
 
 
 # ============================================================
@@ -240,14 +228,14 @@ class ManagedProcess:
                     try:
                         data = json.loads(line)
                         etype = data.get("type", "?")
-                        print(f"[READER] event={etype} sid={self.session_id[:8]}", flush=True)
+                        logger.debug("READER event=%s sid=%s", etype, self.session_id[:8])
                         loop.call_soon_threadsafe(self.queue.put_nowait, data)
                     except json.JSONDecodeError:
-                        print(f"[READER] JSON parse error: {line[:80]}", flush=True)
+                        logger.warning("READER JSON parse error: %s", line[:80])
             except Exception as e:
-                print(f"[READER] exception: {e}", flush=True)
+                logger.error("READER exception: %s", e)
             # stdout が切れた = プロセスとの通信不能 → killしてプールから除去
-            print(f"[READER] stdout切断 sid={self.session_id[:8]} pid={self.proc.pid}", flush=True)
+            logger.info("READER stdout切断 sid=%s pid=%s", self.session_id[:8], self.proc.pid)
             try:
                 self.proc.terminate()
             except Exception:
@@ -272,7 +260,7 @@ class ManagedProcess:
         # JSONL安定性トラッキングをリセット（前のメッセージの状態を引き継がないため）
         self.last_seen_jsonl_mtime = 0.0
         self.last_mtime_change_at = 0.0
-        print(f"[DEBUG] message_sent sid={self.session_id} pid={self.proc.pid}", flush=True)
+        logger.debug("message_sent sid=%s pid=%s", self.session_id, self.proc.pid)
 
     def kill(self) -> None:
         """プロセスを終了する"""
@@ -452,10 +440,10 @@ class CLIBridge:
                     # resultはHTTPストリーム終端として使う（推論完了の判断はしない）
                     if etype == "result":
                         exit_reason = "result"
-                        print(f"[DEBUG] result event sid={mp.session_id} pid={mp.proc.pid}", flush=True)
+                        logger.debug("result event sid=%s pid=%s", mp.session_id, mp.proc.pid)
                         break
             finally:
-                print(f"[RUN_STREAM] 終了 reason={exit_reason} last_event={last_event_type} sid={mp.session_id[:8] if mp.session_id else '?'} pid={mp.proc.pid}", flush=True)
+                logger.info("run_stream終了 reason=%s last_event=%s sid=%s pid=%s", exit_reason, last_event_type, mp.session_id[:8] if mp.session_id else "?", mp.proc.pid)
 
     async def _cleanup_loop(self) -> None:
         """アイドルプロセスを定期的に終了する"""
@@ -501,17 +489,7 @@ class CLIBridge:
     def inferring_session_ids(self, project_path: str) -> list[str]:
         """推論中のセッションIDを返す。
         プロセスプール内のプロセスと、PIDファイルで追跡中の孤児プロセスの両方を検査する。
-
-        ロジック表:
-        | 送信済 | TCP接続 | JSONL更新(送信後) | JSONL末尾  | JSONL安定(3秒) | 判定   |
-        |--------|---------|-----------------|-----------|---------------|--------|
-        | No     | -       | -               | -         | -             | 待機   |
-        | Yes    | 切れ    | -               | -         | -             | 完了   |
-        | Yes    | 接続中  | No              | -         | -             | 推論中 |
-        | Yes    | 接続中  | Yes             | user      | -             | 推論中 |
-        | Yes    | 接続中  | Yes             | assistant | No            | 推論中 |
-        | Yes    | 接続中  | Yes             | assistant | Yes           | 完了   |
-        """
+        判定ロジックは _judge_inferring() を参照。"""
         prefix = f"{project_path}::"
         result = []
         pool_sids = set()
@@ -526,10 +504,6 @@ class CLIBridge:
                 continue
             pool_sids.add(sid)
 
-            # 送信済みでなければ待機中（推論中ではない）
-            if mp.message_sent_at == 0.0:
-                continue
-
             last_role, jsonl_mtime = _jsonl_info(project_path, sid)
 
             # JSONL安定性トラッキング更新
@@ -542,49 +516,41 @@ class CLIBridge:
             jsonl_stable = (mp.last_mtime_change_at > 0
                             and (now - mp.last_mtime_change_at) >= JSONL_STABLE_SECS)
 
-            # 完了判定
-            if not has_conn:
-                # TCP切れ → 完了確定
+            inferring = _judge_inferring(
+                awaiting_response=(mp.message_sent_at > 0.0),
+                has_connection=has_conn,
+                jsonl_updated=jsonl_updated,
+                last_role=last_role,
+                jsonl_stable=jsonl_stable,
+            )
+            if inferring:
+                result.append(sid)
+            elif mp.message_sent_at > 0.0:
+                # 推論完了 → 送信状態をリセット
                 mp.message_sent_at = 0.0
-                print(f"[DEBUG] 完了(TCP切れ) sid={sid[:8]}", flush=True)
-                continue
-            if jsonl_updated and last_role == "assistant" and jsonl_stable:
-                # JSONL末尾=assistant かつ 安定 → 完了
-                mp.message_sent_at = 0.0
-                print(f"[DEBUG] 完了(JSONL安定) sid={sid[:8]}", flush=True)
-                continue
-
-            # 上記以外 → 推論中
-            result.append(sid)
 
         # 2. PID ファイルから孤児プロセスを検査
-        pid_dir = Path(project_path) / ".kobito" / "alive"
-        if pid_dir.exists():
-            for pid_file in pid_dir.glob("*.pid"):
-                sid = pid_file.stem
-                if sid in pool_sids:
-                    continue  # プール内で既に検査済み
+        for pid_file, sid, pid in iter_pid_files(project_path):
+            if sid in pool_sids:
+                continue  # プール内で既に検査済み
+            if not is_process_alive(pid):
                 try:
-                    pid = int(pid_file.read_text(encoding="utf-8").strip())
-                    os.kill(pid, 0)  # 生存確認
-                    has_conn = _has_api_connection(pid)
-                    last_role, _ = _jsonl_info(project_path, sid)
-                    if has_conn and last_role != "assistant":
-                        result.append(sid)
-                    else:
-                        # TCP切れ or JSONL=assistant → 推論終了済みの孤児 → kill してクリーンアップ
-                        try:
-                            psutil.Process(pid).terminate()
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-                        pid_file.unlink(missing_ok=True)
-                        logger.info(f"孤児プロセス終了: PID={pid} session={sid}")
-                except (OSError, ValueError):
-                    # プロセス死亡 or 不正ファイル → PID ファイル削除
-                    try:
-                        pid_file.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                    pid_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                continue
+            has_conn = _has_api_connection(pid)
+            last_role, _ = _jsonl_info(project_path, sid)
+            if has_conn and last_role != "assistant":
+                result.append(sid)
+            else:
+                # TCP切れ or JSONL=assistant → 推論終了済みの孤児 → kill してクリーンアップ
+                terminate_process(pid)
+                try:
+                    pid_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                logger.info(f"孤児プロセス終了: PID={pid} session={sid}")
 
         return result
 
@@ -609,19 +575,13 @@ class CLIBridge:
                 jsonl_stable = (mp.last_mtime_change_at > 0
                                 and (now - mp.last_mtime_change_at) >= JSONL_STABLE_SECS)
                 jsonl_stable_secs = round(now - mp.last_mtime_change_at, 1) if mp.last_mtime_change_at > 0 else None
-                # inferring に合わせてロジック表を再現（参照用）
-                if not awaiting_response:
-                    inferring = False
-                elif not has_conn:
-                    inferring = False
-                elif not jsonl_updated:
-                    inferring = True
-                elif last_role == "user":
-                    inferring = True
-                elif last_role == "assistant" and not jsonl_stable:
-                    inferring = True
-                else:
-                    inferring = False
+                inferring = _judge_inferring(
+                    awaiting_response=awaiting_response,
+                    has_connection=has_conn,
+                    jsonl_updated=jsonl_updated,
+                    last_role=last_role,
+                    jsonl_stable=jsonl_stable,
+                )
                 result.append({
                     "session_id": sid,
                     "pid": pid,
@@ -637,37 +597,26 @@ class CLIBridge:
                 })
 
         # 2. PIDファイル（孤児）
-        pid_dir = Path(project_path) / ".kobito" / "alive"
-        if pid_dir.exists():
-            for pid_file in pid_dir.glob("*.pid"):
-                sid = pid_file.stem
-                if sid in pool_sids:
-                    continue
-                try:
-                    pid = int(pid_file.read_text(encoding="utf-8").strip())
-                    try:
-                        os.kill(pid, 0)
-                        alive = True
-                    except OSError:
-                        alive = False
-                    has_conn = _has_api_connection(pid) if alive else False
-                    last_role, _ = _jsonl_info(project_path, sid)
-                    inferring = alive and last_role != "assistant"
-                    result.append({
-                        "session_id": sid,
-                        "pid": pid,
-                        "source": "pidfile",
-                        "alive": alive,
-                        "connected": has_conn,
-                        "awaiting_response": None,
-                        "jsonl_last_role": last_role,
-                        "jsonl_updated": None,
-                        "jsonl_stable": None,
-                        "jsonl_stable_secs": None,
-                        "inferring": inferring,
-                    })
-                except (ValueError, Exception):
-                    pass
+        for pid_file, sid, pid in iter_pid_files(project_path):
+            if sid in pool_sids:
+                continue
+            alive = is_process_alive(pid)
+            has_conn = _has_api_connection(pid) if alive else False
+            last_role, _ = _jsonl_info(project_path, sid)
+            inferring = has_conn and last_role != "assistant"
+            result.append({
+                "session_id": sid,
+                "pid": pid,
+                "source": "pidfile",
+                "alive": alive,
+                "connected": has_conn,
+                "awaiting_response": None,
+                "jsonl_last_role": last_role,
+                "jsonl_updated": None,
+                "jsonl_stable": None,
+                "jsonl_stable_secs": None,
+                "inferring": inferring,
+            })
 
         return result
 
