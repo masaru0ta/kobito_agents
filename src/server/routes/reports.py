@@ -78,36 +78,29 @@ def list_dir(
                     if is_md or is_code:
                         try:
                             with entry.open(encoding="utf-8", errors="replace") as fh:
-                                in_block_comment = False
                                 first_line = True
+                                fallback = ""
                                 for line in fh:
                                     raw = line.strip()
                                     if not raw:
                                         continue
-                                    # YAMLフロントマター区切り
                                     if first_line and raw == "---":
                                         first_line = False
                                         continue
                                     first_line = False
-                                    # ブロックコメント開始 (/** or /*)
-                                    if raw.startswith("/*"):
-                                        in_block_comment = True
-                                    if in_block_comment:
-                                        # コメント行の内容を抽出 (* を除去)
-                                        content = raw.lstrip("/*").strip()
-                                        if content and content != entry.name:
-                                            preview = content
-                                            break
-                                        if "*/" in raw:
-                                            in_block_comment = False
+                                    # 記号を除いた内容
+                                    content = raw.lstrip("/*!*/#- \t").strip()
+                                    if not content:
                                         continue
-                                    # 行コメント・shebang・記号のみ行をスキップ
-                                    if raw.startswith(("//", "#!", "#", "*")):
-                                        continue
-                                    if raw in {"---", "===", "```"}:
-                                        continue
-                                    preview = raw
-                                    break
+                                    # 日本語を含む行を優先
+                                    if any('\u3000' <= c <= '\u9fff' or '\uff00' <= c <= '\uffef' for c in content):
+                                        preview = content
+                                        break
+                                    # フォールバック: 最初の意味ある行
+                                    if not fallback and content != entry.name:
+                                        fallback = content
+                                if not preview:
+                                    preview = fallback
                         except OSError:
                             pass
                     files.append({
