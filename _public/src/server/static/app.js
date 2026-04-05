@@ -438,12 +438,31 @@ function _appendMsgRange(parent, messages, from, to) {
           <div class="message-time">${time}</div>
         </div>`;
     } else {
-      div.innerHTML = `
-        <div class="message-bubble">${escapeHtml(content)}</div>
-        <div class="message-time">${time}</div>`;
+      const cmd = _parseCommandMessage(content);
+      if (cmd) {
+        div.innerHTML = `
+          <div class="message-bubble cmd-bubble">
+            <span class="cmd-name">${escapeHtml(cmd.name)}</span>${cmd.args ? ` <span class="cmd-args">${escapeHtml(cmd.args)}</span>` : ''}
+          </div>
+          <div class="message-time">${time}</div>`;
+      } else {
+        div.innerHTML = `
+          <div class="message-bubble">${escapeHtml(content)}</div>
+          <div class="message-time">${time}</div>`;
+      }
     }
     parent.appendChild(div);
   }
+}
+
+function _parseCommandMessage(content) {
+  const nameMatch = content.match(/<command-name>([^<]+)<\/command-name>/);
+  if (!nameMatch) return null;
+  const argsMatch = content.match(/<command-args>([\s\S]*?)<\/command-args>/);
+  return {
+    name: nameMatch[1].trim(),
+    args: argsMatch ? argsMatch[1].trim() : '',
+  };
 }
 
 function updateAssistantTimestamps(container) {
