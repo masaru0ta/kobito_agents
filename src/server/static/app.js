@@ -887,9 +887,10 @@ function switchTab(tabName) {
 // ファイルブラウザ
 // ============================================================
 
-let fileBrowserPath = '';   // 現在表示中のディレクトリパス（ルートからの相対）
+let fileBrowserPath = '';       // 現在表示中のディレクトリパス（ルートからの相対）
 let fileBrowserSort = 'mtime';  // 'name' | 'mtime'
-let fileBrowserCache = null;   // 最後にフェッチしたディレクトリデータ
+let fileBrowserCache = null;    // 最後にフェッチしたディレクトリデータ
+let currentFilePath = null;     // 詳細ペインで表示中のファイルパス
 
 async function loadReports() {
   fileBrowserPath = '';
@@ -1008,6 +1009,7 @@ function renderFileDirEntries(data) {
 }
 
 async function openReport(filepath) {
+  currentFilePath = filepath;
   const detailPane = document.getElementById('report-detail-pane');
   const listView = document.getElementById('report-list-view');
   const titleEl = document.getElementById('report-detail-title');
@@ -1034,6 +1036,7 @@ async function openReport(filepath) {
 }
 
 function openImageFile(filepath) {
+  currentFilePath = filepath;
   const detailPane = document.getElementById('report-detail-pane');
   const listView = document.getElementById('report-list-view');
   const titleEl = document.getElementById('report-detail-title');
@@ -1069,6 +1072,7 @@ function highlightJson(text) {
 }
 
 async function openJsonFile(filepath) {
+  currentFilePath = filepath;
   const detailPane = document.getElementById('report-detail-pane');
   const listView = document.getElementById('report-list-view');
   const titleEl = document.getElementById('report-detail-title');
@@ -1090,6 +1094,7 @@ async function openJsonFile(filepath) {
 }
 
 async function openCodeFile(filepath) {
+  currentFilePath = filepath;
   const detailPane = document.getElementById('report-detail-pane');
   const listView = document.getElementById('report-list-view');
   const titleEl = document.getElementById('report-detail-title');
@@ -1127,7 +1132,40 @@ function initReports() {
   document.getElementById('report-back-btn').addEventListener('click', () => {
     document.getElementById('report-detail-pane').style.display = 'none';
     document.getElementById('report-list-view').style.display = 'flex';
+    currentFilePath = null;
   });
+
+  // ファイル詳細メニュー
+  const fileDetailMenuBtn = document.getElementById('file-detail-menu-btn');
+  const fileDetailMenu = document.getElementById('file-detail-menu');
+  fileDetailMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fileDetailMenu.classList.toggle('open');
+  });
+  document.addEventListener('click', () => fileDetailMenu.classList.remove('open'));
+
+  // ファイルについて話す
+  document.getElementById('btn-file-talk').addEventListener('click', async () => {
+    fileDetailMenu.classList.remove('open');
+    if (!currentAgentId || !currentFilePath) return;
+    // 既存リンクを確認
+    const linkData = await fetch(`${API}/agents/${currentAgentId}/file-links?path=${encodeURIComponent(currentFilePath)}`).then(r => r.json());
+    let sid = linkData.session_id;
+    if (!sid) {
+      // 新規セッション作成
+      const title = currentFilePath.split('/').pop();
+      const res = await fetch(`${API}/agents/${currentAgentId}/file-links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: currentFilePath, title }),
+      }).then(r => r.json());
+      sid = res.session_id;
+    }
+    await loadSessions();
+    await selectSession(sid);
+    switchTab('chat');
+  });
+
   document.querySelectorAll('.file-sort-tab').forEach(el => {
     el.addEventListener('click', () => {
       fileBrowserSort = el.dataset.sort;
