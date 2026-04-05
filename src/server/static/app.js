@@ -67,15 +67,19 @@ async function loadAgents() {
 
 function renderAgents() {
   const list = document.getElementById('agent-list');
-  list.innerHTML = agents.map(a => `
+  list.innerHTML = agents.map(a => {
+    const avatarHtml = a.thumbnail_url
+      ? `<img src="${a.thumbnail_url}" class="agent-avatar-img" alt="">`
+      : `<div class="agent-avatar">${escapeHtml(a.name.charAt(0))}</div>`;
+    return `
     <div class="agent-item${a.id === currentAgentId ? ' active' : ''}" data-agent-id="${a.id}">
-      <div class="agent-avatar">${a.name.charAt(0)}</div>
+      ${avatarHtml}
       <div class="agent-info">
-        <div class="agent-name">${a.name}</div>
-        <div class="agent-desc">${a.description || ''}</div>
+        <div class="agent-name">${escapeHtml(a.name)}</div>
+        <div class="agent-desc">${escapeHtml(a.description || '')}</div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   list.querySelectorAll('.agent-item').forEach(el => {
     el.addEventListener('click', () => selectAgent(el.dataset.agentId));
@@ -400,15 +404,41 @@ function renderMessages(messages, sessionId) {
       ? marked.parse(content)
       : escapeHtml(content);
 
-    div.innerHTML = `
-      <div class="message-sender">${escapeHtml(sender)}</div>
-      <div class="message-bubble">${bubbleContent}</div>
-      <div class="message-time">${time}</div>
-    `;
+    if (m.role === 'assistant') {
+      const avatarHtml = agent?.thumbnail_url
+        ? `<img src="${agent.thumbnail_url}" class="msg-avatar" alt="">`
+        : `<div class="msg-avatar-letter">${escapeHtml((agent?.name || '?').charAt(0))}</div>`;
+      div.innerHTML = `
+        <div class="msg-avatar-col">${avatarHtml}</div>
+        <div class="msg-body">
+          <div class="message-bubble">${bubbleContent}</div>
+          <div class="message-time">${time}</div>
+        </div>
+      `;
+    } else {
+      div.innerHTML = `
+        <div class="message-bubble">${bubbleContent}</div>
+        <div class="message-time">${time}</div>
+      `;
+    }
     container.appendChild(div);
   });
 
+  updateAssistantTimestamps(container);
   container.scrollTop = container.scrollHeight;
+}
+
+function updateAssistantTimestamps(container) {
+  const items = Array.from(container.children);
+  for (let i = 0; i < items.length; i++) {
+    if (!items[i].classList.contains('assistant')) continue;
+    let followed = false;
+    for (let j = i + 1; j < items.length; j++) {
+      if (items[j].classList.contains('assistant')) { followed = true; break; }
+      if (!items[j].classList.contains('tool-use-notice')) break;
+    }
+    items[i].classList.toggle('hide-time', followed);
+  }
 }
 
 const MODEL_LABELS = {
@@ -802,12 +832,25 @@ function appendMessage(role, content) {
 
   const div = document.createElement('div');
   div.className = `message ${role}`;
-  div.innerHTML = `
-    <div class="message-sender">${escapeHtml(sender)}</div>
-    <div class="message-bubble">${escapeHtml(content)}</div>
-    <div class="message-time">${time}</div>
-  `;
+  if (role === 'assistant') {
+    const avatarHtml = agent?.thumbnail_url
+      ? `<img src="${agent.thumbnail_url}" class="msg-avatar" alt="">`
+      : `<div class="msg-avatar-letter">${escapeHtml((agent?.name || '?').charAt(0))}</div>`;
+    div.innerHTML = `
+      <div class="msg-avatar-col">${avatarHtml}</div>
+      <div class="msg-body">
+        <div class="message-bubble">${escapeHtml(content)}</div>
+        <div class="message-time">${time}</div>
+      </div>
+    `;
+  } else {
+    div.innerHTML = `
+      <div class="message-bubble">${escapeHtml(content)}</div>
+      <div class="message-time">${time}</div>
+    `;
+  }
   container.appendChild(div);
+  updateAssistantTimestamps(container);
   container.scrollTop = container.scrollHeight;
   return div;
 }
@@ -1283,6 +1326,17 @@ async function loadSettingsData() {
   const promptData = await promptResp.json();
   document.querySelector('[data-field="system-prompt"]').value = promptData.content || '';
 
+  // サムネイルプレビュー更新
+  const preview = document.getElementById('settings-avatar-preview');
+  const removeBtn = document.getElementById('thumbnail-remove-btn');
+  if (agent.thumbnail_url) {
+    preview.innerHTML = `<img src="${agent.thumbnail_url}?t=${Date.now()}" alt="">`;
+    removeBtn.style.display = '';
+  } else {
+    preview.innerHTML = `<div class="agent-avatar settings-avatar-large">${escapeHtml(agent.name.charAt(0))}</div>`;
+    removeBtn.style.display = 'none';
+  }
+
   // systemエージェント以外のとき登録解除ボタンを表示
   const dangerZone = document.getElementById('danger-zone');
   dangerZone.style.display = currentAgentId === 'system' ? 'none' : 'block';
@@ -1385,6 +1439,31 @@ function initActions() {
       }),
     });
     await loadAgents();
+  });
+
+  // サムネイルアップロード
+  const thumbnailInput = document.getElementById('thumbnail-input');
+  document.getElementById('settings-avatar-preview').addEventListener('click', () => thumbnailInput.click());
+  thumbnailInput.addEventListener('change', async () => {
+    const file = thumbnailInput.files[0];
+    if (!file || !currentAgentId) return;
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await fetch(`${API}/agents/${currentAgentId}/thumbnail`, { method: 'POST', body: form });
+    thumbnailInput.value = '';
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(err.detail || 'アップロードに失敗しました');
+      return;
+    }
+    await loadAgents();
+    loadSettingsData();
+  });
+  document.getElementById('thumbnail-remove-btn').addEventListener('click', async () => {
+    if (!currentAgentId) return;
+    await fetch(`${API}/agents/${currentAgentId}/thumbnail`, { method: 'DELETE' });
+    await loadAgents();
+    loadSettingsData();
   });
 
   // エージェント追加フォーム

@@ -19,6 +19,7 @@ class AgentInfo(BaseModel):
     cli: str = "claude"
     model_tier: str = "deep"
     system_prompt: str = ""
+    thumbnail_url: str | None = None
 
 
 class AgentNotFoundError(Exception):
@@ -66,11 +67,39 @@ class ConfigManager:
             json.dumps(agents, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    _THUMBNAIL_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
     def _read_system_prompt(self, path: str) -> str:
         claude_md = Path(path) / "CLAUDE.md"
         if claude_md.exists():
             return claude_md.read_text(encoding="utf-8")
         return ""
+
+    def get_thumbnail_path(self, agent_id: str) -> Path | None:
+        thumb_dir = self._data_dir / "thumbnails"
+        for ext in self._THUMBNAIL_EXTS:
+            p = thumb_dir / f"{agent_id}{ext}"
+            if p.exists():
+                return p
+        return None
+
+    def get_thumbnail_url(self, agent_id: str) -> str | None:
+        if self.get_thumbnail_path(agent_id):
+            return f"/api/agents/{agent_id}/thumbnail"
+        return None
+
+    def save_thumbnail(self, agent_id: str, data: bytes, ext: str) -> None:
+        self.delete_thumbnail(agent_id)
+        thumb_dir = self._data_dir / "thumbnails"
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        (thumb_dir / f"{agent_id}{ext}").write_bytes(data)
+
+    def delete_thumbnail(self, agent_id: str) -> bool:
+        p = self.get_thumbnail_path(agent_id)
+        if p:
+            p.unlink()
+            return True
+        return False
 
     def list_agents(self) -> list[AgentInfo]:
         agents = self._read_agents()
@@ -78,6 +107,7 @@ class ConfigManager:
             AgentInfo(
                 **agent,
                 system_prompt=self._read_system_prompt(agent["path"]),
+                thumbnail_url=self.get_thumbnail_url(agent["id"]),
             )
             for agent in agents
         ]
@@ -88,6 +118,7 @@ class ConfigManager:
                 return AgentInfo(
                     **agent,
                     system_prompt=self._read_system_prompt(agent["path"]),
+                    thumbnail_url=self.get_thumbnail_url(agent_id),
                 )
         raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
 

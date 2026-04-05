@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>kobito_agents</title>
-<link rel="stylesheet" href="/style.css?v=8">
+<link rel="stylesheet" href="/style.css?v=12">
 <link rel="stylesheet" href="/highlight-github-dark.min.css">
 </head>
 <body>
@@ -88,6 +88,14 @@
 
     <!-- 設定タブ -->
     <div id="settings-tab-content" class="settings-content">
+      <div class="settings-section settings-thumbnail-section">
+        <label>アバター画像</label>
+        <div class="settings-thumbnail-wrap">
+          <div class="settings-avatar-preview" id="settings-avatar-preview" title="クリックして変更"></div>
+          <input type="file" id="thumbnail-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;">
+          <button class="settings-thumbnail-remove" id="thumbnail-remove-btn" style="display:none;">削除</button>
+        </div>
+      </div>
       <div class="settings-section">
         <label>名前</label>
         <input type="text" class="settings-input" data-field="name">
@@ -239,6 +247,6 @@
 
 <script src="/marked.min.js"></script>
 <script src="/highlight.min.js"></script>
-<script src="/app.js?v=8"></script>
+<script src="/app.js?v=12"></script>
 </body>
 </html>
