@@ -227,7 +227,7 @@ body {
 .task-back-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
 
 /* サイドバートグルボタン（デスクトップでは非表示） */
-.sidebar-toggle { display: none; padding: 6px 10px; background: transparent; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; flex-shrink: 0; line-height: 1; }
+.sidebar-toggle { display: none; padding: 10px 14px; background: transparent; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer; flex-shrink: 0; line-height: 1; }
 .sidebar-toggle:hover { color: var(--text-primary); }
 
 /* レスポンシブ: 中間サイズ（サイドバー折りたたみ可） */
