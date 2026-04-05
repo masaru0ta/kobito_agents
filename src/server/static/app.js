@@ -1170,6 +1170,8 @@ function initReports() {
       pendingFileLinkPath = currentFilePath;
       currentSessionId = null;
       clearChat();
+      activateSessionContainer(null);
+      document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
       switchTab('chat');
     }
   });
