@@ -282,6 +282,7 @@ function renderSessions(sessions) {
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
   lastWatchingMtime = 0; // セッション切替時にリセット
+  hideSystemPromptPreview();
   // キャッシュされたコンテナを即時表示（切替を高速化）
   activateSessionContainer(sessionId);
   // モバイル: チャット画面に切り替え
@@ -666,6 +667,7 @@ async function sendMessage(opts = {}) {
 
   // 送信先セッションのコンテナを確実に表示（新規セッション含む）
   activateSessionContainer(sentSessionId);
+  hideSystemPromptPreview();
 
   // ユーザーメッセージを即座に表示
   appendMessage('user', message);
@@ -930,10 +932,16 @@ function activateSessionContainer(sessionId) {
   return el;
 }
 
+function hideSystemPromptPreview() {
+  const host = document.getElementById('system-prompt-preview-host');
+  if (host) host.innerHTML = '';
+}
+
 async function showSystemPromptPreview(agentId) {
   if (!agentId) return;
-  const container = getSessionContainer(null);
-  container.querySelector('.system-prompt-preview')?.remove();
+  const host = document.getElementById('system-prompt-preview-host');
+  if (!host) return;
+  host.innerHTML = '';
 
   let data;
   try {
@@ -943,9 +951,6 @@ async function showSystemPromptPreview(agentId) {
   } catch (_) { return; }
 
   if (!data.content && !data.shared_instructions) return;
-
-  const preview = document.createElement('div');
-  preview.className = 'system-prompt-preview';
 
   let sectionsHtml = '';
   if (data.content) {
@@ -961,6 +966,8 @@ async function showSystemPromptPreview(agentId) {
     </div>`;
   }
 
+  const preview = document.createElement('div');
+  preview.className = 'system-prompt-preview';
   preview.innerHTML = `
     <div class="spp-header" onclick="this.closest('.system-prompt-preview').classList.toggle('expanded')">
       <span class="spp-icon">&#9881;</span>
@@ -969,7 +976,7 @@ async function showSystemPromptPreview(agentId) {
     </div>
     <div class="spp-body">${sectionsHtml}</div>`;
 
-  container.insertBefore(preview, container.firstChild);
+  host.appendChild(preview);
 }
 
 // ============================================================

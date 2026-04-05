@@ -152,6 +152,8 @@ body {
 .chat-menu-danger:hover { background: #f8514918; }
 .chat-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
 
+#system-prompt-preview-host { padding: 8px 10px 0; flex-shrink: 0; }
+#system-prompt-preview-host:empty { display: none; }
 #chat-messages-host { flex: 1; overflow: hidden; position: relative; }
 .chat-messages { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 20px 10px; display: flex; flex-direction: column; gap: 8px; }
 .load-more-btn { display: block; margin: 8px auto; padding: 5px 16px; background: transparent; border: 1px solid var(--border); border-radius: 12px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
@@ -195,7 +197,7 @@ body {
 .thinking-timer { font-size: 11px; color: var(--text-muted); min-width: 2.5em; }
 
 /* システムプロンプトプレビュー（新規チャット時） */
-.system-prompt-preview { align-self: stretch; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); margin-bottom: 4px; overflow: hidden; }
+.system-prompt-preview { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); overflow: hidden; }
 .spp-header { display: flex; align-items: center; gap: 6px; padding: 7px 12px; cursor: pointer; font-size: 12px; color: var(--text-secondary); user-select: none; }
 .spp-header:hover { background: var(--bg-tertiary); }
 .spp-icon { color: var(--accent); font-size: 11px; }

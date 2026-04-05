@@ -145,7 +145,7 @@ def get_system_prompt(agent_id: str, config: ConfigManager = Depends(get_config_
         content = config.get_system_prompt(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    shared_path = Path(__file__).resolve().parents[2] / "assets" / "prompts" / "shared_instructions.md"
+    shared_path = Path(__file__).resolve().parents[3] / "assets" / "prompts" / "shared_instructions.md"
     shared = shared_path.read_text(encoding="utf-8") if shared_path.exists() else None
     return {"content": content, "shared_instructions": shared}
 
