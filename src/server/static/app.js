@@ -691,6 +691,16 @@ async function sendMessage(opts = {}) {
                 const oldKey = sentSessionId || 'new';
                 currentSessionId = newSessionId;
                 sentSessionId = newSessionId; // isViewingThisSession()が以降もtrueを返すように同期
+                // ファイルリンクが pending なら保存
+                if (pendingFileLinkPath && sentAgentId) {
+                  const fp = pendingFileLinkPath;
+                  pendingFileLinkPath = null;
+                  fetch(`${API}/agents/${sentAgentId}/file-links`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_path: fp, session_id: newSessionId, title: fp.split('/').pop() }),
+                  });
+                }
                 // activeStreamsのキーも新IDに移行
                 activeStreams.delete(oldKey);
                 activeStreams.add(newSessionId);
@@ -890,7 +900,8 @@ function switchTab(tabName) {
 let fileBrowserPath = '';       // 現在表示中のディレクトリパス（ルートからの相対）
 let fileBrowserSort = 'mtime';  // 'name' | 'mtime'
 let fileBrowserCache = null;    // 最後にフェッチしたディレクトリデータ
-let currentFilePath = null;     // 詳細ペインで表示中のファイルパス
+let currentFilePath = null;      // 詳細ペインで表示中のファイルパス
+let pendingFileLinkPath = null;  // 新規セッション確立後にリンクする予定のファイルパス
 
 async function loadReports() {
   fileBrowserPath = '';
@@ -1150,20 +1161,17 @@ function initReports() {
     if (!currentAgentId || !currentFilePath) return;
     // 既存リンクを確認
     const linkData = await fetch(`${API}/agents/${currentAgentId}/file-links?path=${encodeURIComponent(currentFilePath)}`).then(r => r.json());
-    let sid = linkData.session_id;
-    if (!sid) {
-      // 新規セッション作成
-      const title = currentFilePath.split('/').pop();
-      const res = await fetch(`${API}/agents/${currentAgentId}/file-links`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: currentFilePath, title }),
-      }).then(r => r.json());
-      sid = res.session_id;
+    if (linkData.session_id) {
+      // 既存セッションを開く
+      await loadSessions();
+      await selectSession(linkData.session_id);
+    } else {
+      // 新規チャット起動。セッションIDは最初のメッセージ送信後に確定する
+      pendingFileLinkPath = currentFilePath;
+      currentSessionId = null;
+      clearChat();
+      switchTab('chat');
     }
-    await loadSessions();
-    await selectSession(sid);
-    switchTab('chat');
   });
 
   document.querySelectorAll('.file-sort-tab').forEach(el => {

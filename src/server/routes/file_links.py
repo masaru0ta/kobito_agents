@@ -1,7 +1,6 @@
 """ファイルリンクAPI — ファイルとチャットセッションの紐づけを管理する"""
 
 import json
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +82,7 @@ def get_file_link(
 
 class CreateLinkRequest(BaseModel):
     file_path: str
+    session_id: str
     title: str = ""
 
 
@@ -92,20 +92,18 @@ def create_file_link(
     body: CreateLinkRequest,
     config: ConfigManager = Depends(get_config_manager),
 ):
-    """ファイルに紐づく新規セッションを作成し、セッションIDを返す。"""
+    """ファイルとセッションIDのリンクを保存する。"""
     try:
         agent = config.get_agent(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
 
-    session_id = str(uuid.uuid4())
     title = body.title or body.file_path.split("/")[-1]
-
-    _write_session_meta(agent.path, session_id, body.file_path, title)
+    _write_session_meta(agent.path, body.session_id, body.file_path, title)
     _write_link(agent.path, body.file_path, {
         "file_path": body.file_path,
-        "session_id": session_id,
+        "session_id": body.session_id,
     })
 
-    print(f"[FILE-LINK] 作成 file={body.file_path} sid={session_id}", flush=True)
-    return {"session_id": session_id}
+    print(f"[FILE-LINK] 保存 file={body.file_path} sid={body.session_id}", flush=True)
+    return {"status": "ok"}
