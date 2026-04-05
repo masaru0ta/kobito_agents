@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>kobito_agents</title>
-<link rel="stylesheet" href="/style.css?v=6">
+<link rel="stylesheet" href="/style.css?v=8">
 <link rel="stylesheet" href="/highlight-github-dark.min.css">
 </head>
 <body>
@@ -175,8 +175,11 @@
     <div class="chat-header">
       <button class="mobile-back-btn" id="mobile-back-btn">←</button>
       <div class="chat-title-group">
-        <span class="chat-title" id="chat-title" title="クリックして編集"></span>
-        <select class="model-select header-model-select" id="model-select"></select>
+        <div class="chat-title-row">
+          <span class="chat-title" id="chat-title" title="クリックして編集"></span>
+          <select class="model-select header-model-select" id="model-select"></select>
+        </div>
+        <a id="chat-linked-file" style="display:none;" title="ファイルを開く"></a>
       </div>
       <div class="chat-menu-wrapper">
         <button class="chat-menu-btn" id="chat-menu-btn">⋮</button>
@@ -236,6 +239,6 @@
 
 <script src="/marked.min.js"></script>
 <script src="/highlight.min.js"></script>
-<script src="/app.js?v=6"></script>
+<script src="/app.js?v=8"></script>
 </body>
 </html>

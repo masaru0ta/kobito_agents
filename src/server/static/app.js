@@ -334,6 +334,28 @@ async function loadSessionHistory(sessionId, force = false) {
     ? formatDate(messages[0].timestamp)
     : '';
   document.getElementById('chat-title').textContent = currentSessionTitle || (date ? `${date} の会話` : '');
+
+  // ファイル・タスクリンク表示
+  const linkedFileEl = document.getElementById('chat-linked-file');
+  linkedFileEl.style.display = 'none';
+  fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}/meta`)
+    .then(r => r.json())
+    .then(meta => {
+      if (meta.linked_task) {
+        const title = meta.linked_task_title || meta.linked_task;
+        linkedFileEl.innerHTML = `📋 ${escapeHtml(title)}`;
+        linkedFileEl.dataset.linkPath = meta.linked_task;
+        linkedFileEl.dataset.linkType = 'task';
+        linkedFileEl.style.display = 'block';
+      } else if (meta.linked_file) {
+        const fname = meta.linked_file.split('/').pop();
+        linkedFileEl.innerHTML = `📎 ${escapeHtml(fname)}`;
+        linkedFileEl.dataset.linkPath = meta.linked_file;
+        linkedFileEl.dataset.linkType = 'file';
+        linkedFileEl.style.display = 'block';
+      }
+    })
+    .catch(() => {});
 }
 
 function renderMessages(messages, sessionId) {
@@ -415,6 +437,7 @@ function clearChat() {
   Object.keys(sessionDomCache).forEach(k => delete sessionDomCache[k]);
   document.getElementById('chat-title').textContent = '';
   currentSessionTitle = '';
+  document.getElementById('chat-linked-file').style.display = 'none';
 }
 
 async function saveSessionTitle(title) {
@@ -1160,7 +1183,32 @@ async function openCodeFile(filepath) {
   }
 }
 
+async function openFileByPath(filepath) {
+  const ext = filepath.split('.').pop().toLowerCase();
+  if (ext === 'md') return openReport(filepath);
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return openImageFile(filepath);
+  if (ext === 'json') return openJsonFile(filepath);
+  return openCodeFile(filepath);
+}
+
 function initReports() {
+  // チャットヘッダーのファイル・タスクリンク
+  document.getElementById('chat-linked-file').addEventListener('click', async () => {
+    const el = document.getElementById('chat-linked-file');
+    const lp = el.dataset.linkPath;
+    if (!lp) return;
+    if (el.dataset.linkType === 'task') {
+      switchTab('tasks');
+      selectTask(lp);
+    } else {
+      switchTab('reports');
+      const parts = lp.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+      await renderFileDir(dir);
+      await openFileByPath(lp);
+    }
+  });
+
   document.getElementById('report-back-btn').addEventListener('click', () => {
     document.getElementById('report-detail-pane').style.display = 'none';
     document.getElementById('report-list-view').style.display = 'flex';

@@ -71,6 +71,23 @@ def get_session(
     return [m.model_dump() if hasattr(m, 'model_dump') else m.dict() for m in messages]
 
 
+@router.get("/sessions/{session_id}/meta")
+def get_session_meta(
+    agent_id: str,
+    session_id: str,
+    config: ConfigManager = Depends(get_config_manager),
+):
+    """セッションのメタデータ（linked_file等）を返す"""
+    try:
+        agent = config.get_agent(agent_id)
+    except AgentNotFoundError:
+        raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
+    meta_path = Path(agent.path) / ".kobito" / "meta" / f"{session_id}.json"
+    if not meta_path.exists():
+        return {}
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
 @router.post("/chat")
 async def send_chat(
     agent_id: str,

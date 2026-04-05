@@ -121,9 +121,12 @@ body {
 /* 右ペイン: チャット */
 .chat-pane { flex: 1; min-width: 300px; display: flex; flex-direction: column; overflow: hidden; }
 .chat-pane.hidden { display: none; }
-.chat-header { height: 48px; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
-.chat-title-group { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
+.chat-header { min-height: 48px; height: auto; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.chat-title-group { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; overflow: hidden; padding: 6px 0; }
+.chat-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
 .chat-title { font-size: 14px; font-weight: 500; color: var(--text-secondary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chat-linked-file { font-size: 11px; color: var(--accent); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-decoration: none; opacity: 0.85; }
+#chat-linked-file:hover { opacity: 1; text-decoration: underline; }
 .chat-title:hover { color: var(--accent); }
 .chat-menu-wrapper { position: relative; }
 .chat-menu-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 4px; line-height: 1; }
@@ -229,8 +232,9 @@ body {
   .mobile-back-btn { display: block; }
   .sidebar { z-index: 30; }
   .tabs { padding-top: env(safe-area-inset-top); }
-  .chat-header { height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 10px 0; flex-wrap: nowrap; gap: 6px; }
-  .chat-title-group { gap: 6px; }
+  .chat-header { min-height: calc(48px + env(safe-area-inset-top)); height: auto; padding: env(safe-area-inset-top) 10px 0; flex-wrap: nowrap; gap: 6px; }
+  .chat-title-group { gap: 2px; }
+  .chat-title-row { gap: 6px; }
   .chat-title { font-size: 12px; }
   .header-model-select { font-size: 11px; padding: 2px 4px; }
   .chat-actions { gap: 4px; flex-shrink: 0; }
