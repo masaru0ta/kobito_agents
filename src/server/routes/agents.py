@@ -1,5 +1,7 @@
 """エージェント関連API"""
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -30,7 +32,7 @@ class AgentCreateRequest(BaseModel):
     path: str
     description: str = ""
     cli: str = "claude"
-    model_tier: str = "deep"
+    model_tier: str = "quick"
 
 
 class AgentUpdateRequest(BaseModel):
@@ -82,7 +84,7 @@ def get_thumbnail(agent_id: str, config: ConfigManager = Depends(get_config_mana
     p = config.get_thumbnail_path(agent_id)
     if not p:
         raise HTTPException(status_code=404, detail="サムネイルが設定されていません")
-    return FileResponse(str(p), headers={"Cache-Control": "no-cache"})
+    return FileResponse(str(p), headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.post("/{agent_id}/thumbnail")
@@ -143,7 +145,9 @@ def get_system_prompt(agent_id: str, config: ConfigManager = Depends(get_config_
         content = config.get_system_prompt(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    return {"content": content}
+    shared_path = Path(__file__).resolve().parents[3] / "assets" / "prompts" / "shared_instructions.md"
+    shared = shared_path.read_text(encoding="utf-8") if shared_path.exists() else None
+    return {"content": content, "shared_instructions": shared}
 
 
 @router.put("/{agent_id}/system-prompt")

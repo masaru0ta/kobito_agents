@@ -182,7 +182,8 @@ function renderProcessDebug(processes) {
       : '';
     return `<div class="process-debug-item"><span class="process-debug-sid" title="${p.session_id}">PID:${p.pid} ${escapeHtml(title)}${srcTag}</span></div><div class="process-debug-item process-debug-sub"><span class="process-debug-status ${inferClass}">${inferLabel}</span><span class="process-debug-status ${tcpClass}">TCP:${tcp}</span><span class="process-debug-status ${jsonlClass}">JSONL:${jsonlRole}</span>${stableSpan}</div>`;
   }).join('');
-  el.innerHTML = `<div class="process-debug-title">プロセス (${processes.length})</div>${items}`;
+  const agentName = agents.find(a => a.id === currentAgentId)?.name || currentAgentId;
+  el.innerHTML = `<div class="process-debug-title">${escapeHtml(agentName)} のプロセス (${processes.length})</div>${items}`;
 }
 
 function syncInferringIndicators(prev, current) {
@@ -253,15 +254,20 @@ function renderSessions(sessions) {
     const titleHtml = s.title
       ? `<div class="conv-title">${escapeHtml(s.title)}</div>`
       : '';
+    const initiatedHtml = s.initiated_by
+      ? `<div class="conv-initiated-by">via ${escapeHtml(s.initiated_by)}</div>`
+      : '';
     return `
       <div class="conversation-item${s.session_id === currentSessionId ? ' active' : ''}" data-session-id="${s.session_id}">
         <div class="conv-header">
           <span class="conv-date">${date} 更新</span>
           <span class="conv-header-right">
+            ${s.initiated_by ? '<span class="conv-badge-link">&#x1F517;</span>' : ''}
             <span class="conv-count">(${s.message_count})</span>
           </span>
         </div>
         ${titleHtml}
+        ${initiatedHtml}
         <div class="conv-preview">${escapeHtml(s.last_message)}</div>
         ${statusHtml}
       </div>
@@ -276,6 +282,7 @@ function renderSessions(sessions) {
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
   lastWatchingMtime = 0; // セッション切替時にリセット
+  hideSystemPromptPreview();
   // キャッシュされたコンテナを即時表示（切替を高速化）
   activateSessionContainer(sessionId);
   // モバイル: チャット画面に切り替え
@@ -302,7 +309,7 @@ async function selectSession(sessionId) {
       sel.value = metaTier;
       sessionModelTiers[sessionId] = metaTier;
     } else if (agent) {
-      sel.value = agent.model_tier || 'deep';
+      sel.value = agent.model_tier || 'quick';
     }
   }
   applyModelSelectStyle(sel);
@@ -362,70 +369,100 @@ async function loadSessionHistory(sessionId, force = false) {
     .catch(() => {});
 }
 
+const MSG_PAGE = 100;
+
 function renderMessages(messages, sessionId) {
-  const container = getSessionContainer(sessionId || currentSessionId);
-  // innerHTML クリア前に残留 thinkingEl のタイマーを停止
+  const key = sessionId || currentSessionId;
+  const container = getSessionContainer(key);
   container.querySelectorAll('.thinking-indicator').forEach(el => el._stopTimer?.());
   container.innerHTML = '';
-  // キャッシュを有効にマーク
-  const cacheKey = sessionId || currentSessionId;
-  if (sessionDomCache[cacheKey]) sessionDomCache[cacheKey].stale = false;
+  if (sessionDomCache[key]) {
+    sessionDomCache[key].stale = false;
+    sessionDomCache[key].allMessages = messages;
+  }
+  const from = Math.max(0, messages.length - MSG_PAGE);
+  if (from > 0) container.appendChild(_makeLoadMoreBtn(key, from, container));
+  _appendMsgRange(container, messages, from, messages.length);
+  updateAssistantTimestamps(container);
+  container.scrollTop = container.scrollHeight;
+}
 
+function _makeLoadMoreBtn(key, upTo, container) {
+  const btn = document.createElement('button');
+  btn.className = 'load-more-btn';
+  btn.textContent = `過去 ${upTo} 件を読み込む`;
+  btn.onclick = () => {
+    const msgs = sessionDomCache[key]?.allMessages;
+    if (!msgs) return;
+    const newFrom = Math.max(0, upTo - MSG_PAGE);
+    btn.remove();
+    const frag = document.createDocumentFragment();
+    if (newFrom > 0) frag.appendChild(_makeLoadMoreBtn(key, newFrom, container));
+    _appendMsgRange(frag, msgs, newFrom, upTo);
+    container.insertBefore(frag, container.firstChild);
+    updateAssistantTimestamps(container);
+  };
+  return btn;
+}
+
+function _appendMsgRange(parent, messages, from, to) {
   const agent = agents.find(a => a.id === currentAgentId);
-  const agentName = agent ? agent.name : '';
+  const avatarHtml = agent?.thumbnail_url
+    ? `<img src="${agent.thumbnail_url}" class="msg-avatar" alt="">`
+    : `<div class="msg-avatar-letter">${escapeHtml((agent?.name || '?').charAt(0))}</div>`;
 
-  messages.forEach(m => {
-    // 空メッセージはスキップ
+  for (let i = from; i < to; i++) {
+    const m = messages[i];
     const content = (m.content || '').trim();
-    if (!content && (!m.tool_uses || m.tool_uses.length === 0)) return;
+    if (!content && (!m.tool_uses || m.tool_uses.length === 0)) continue;
 
-    // ツール使用通知
-    if (m.tool_uses && m.tool_uses.length > 0) {
+    if (m.tool_uses?.length > 0) {
       m.tool_uses.forEach(tu => {
         const notice = document.createElement('div');
         notice.className = 'tool-use-notice';
-        const desc = describeToolUse(tu);
-        notice.innerHTML = `<span class="icon">&#9881;</span> ${escapeHtml(desc)}`;
-        container.appendChild(notice);
+        notice.innerHTML = `<span class="icon">&#9881;</span> ${escapeHtml(describeToolUse(tu))}`;
+        parent.appendChild(notice);
       });
     }
-
-    // 空contentのtool_useのみメッセージはバブルをスキップ
-    if (!content) return;
+    if (!content) continue;
 
     const div = document.createElement('div');
     div.className = `message ${m.role}`;
-
-    const sender = m.role === 'user' ? 'あなた' : agentName;
     const time = formatDate(m.timestamp);
-
-    // Markdownレンダリング（assistantのみ）
-    const bubbleContent = m.role === 'assistant' && typeof marked !== 'undefined'
-      ? marked.parse(content)
-      : escapeHtml(content);
-
     if (m.role === 'assistant') {
-      const avatarHtml = agent?.thumbnail_url
-        ? `<img src="${agent.thumbnail_url}" class="msg-avatar" alt="">`
-        : `<div class="msg-avatar-letter">${escapeHtml((agent?.name || '?').charAt(0))}</div>`;
+      const bubbleContent = typeof marked !== 'undefined' ? marked.parse(content) : escapeHtml(content);
       div.innerHTML = `
         <div class="msg-avatar-col">${avatarHtml}</div>
         <div class="msg-body">
           <div class="message-bubble">${bubbleContent}</div>
           <div class="message-time">${time}</div>
-        </div>
-      `;
+        </div>`;
     } else {
-      div.innerHTML = `
-        <div class="message-bubble">${bubbleContent}</div>
-        <div class="message-time">${time}</div>
-      `;
+      const cmd = _parseCommandMessage(content);
+      if (cmd) {
+        div.innerHTML = `
+          <div class="message-bubble cmd-bubble">
+            <span class="cmd-name">${escapeHtml(cmd.name)}</span>${cmd.args ? ` <span class="cmd-args">${escapeHtml(cmd.args)}</span>` : ''}
+          </div>
+          <div class="message-time">${time}</div>`;
+      } else {
+        div.innerHTML = `
+          <div class="message-bubble">${escapeHtml(content)}</div>
+          <div class="message-time">${time}</div>`;
+      }
     }
-    container.appendChild(div);
-  });
+    parent.appendChild(div);
+  }
+}
 
-  updateAssistantTimestamps(container);
-  container.scrollTop = container.scrollHeight;
+function _parseCommandMessage(content) {
+  const nameMatch = content.match(/<command-name>([^<]+)<\/command-name>/);
+  if (!nameMatch) return null;
+  const argsMatch = content.match(/<command-args>([\s\S]*?)<\/command-args>/);
+  return {
+    name: nameMatch[1].trim(),
+    args: argsMatch ? argsMatch[1].trim() : '',
+  };
 }
 
 function updateAssistantTimestamps(container) {
@@ -452,7 +489,7 @@ function updateModelSelect(agent) {
   sel.innerHTML = Object.entries(labels)
     .map(([tier, label]) => `<option value="${tier}">${label}</option>`)
     .join('');
-  sel.value = agent.model_tier || 'deep';
+  sel.value = agent.model_tier || 'quick';
   applyModelSelectStyle(sel);
 }
 
@@ -555,6 +592,7 @@ async function openTalkSession(taskId) {
   currentSessionId = null;
   clearChat();
   activateSessionContainer(null);
+  showSystemPromptPreview(currentAgentId);
   document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
   switchTab('chat');
 
@@ -605,6 +643,7 @@ async function startWorkSession(taskId, message) {
   currentSessionId = null;
   clearChat();
   activateSessionContainer(null);
+  showSystemPromptPreview(currentAgentId);
   document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
   switchTab('chat');
 
@@ -911,6 +950,53 @@ function activateSessionContainer(sessionId) {
   return el;
 }
 
+function hideSystemPromptPreview() {
+  const host = document.getElementById('system-prompt-preview-host');
+  if (host) host.innerHTML = '';
+}
+
+async function showSystemPromptPreview(agentId) {
+  if (!agentId) return;
+  const host = document.getElementById('system-prompt-preview-host');
+  if (!host) return;
+  host.innerHTML = '';
+
+  let data;
+  try {
+    const resp = await fetch(`${API}/agents/${agentId}/system-prompt`);
+    if (!resp.ok) return;
+    data = await resp.json();
+  } catch (_) { return; }
+
+  if (!data.content && !data.shared_instructions) return;
+
+  let sectionsHtml = '';
+  if (data.content) {
+    sectionsHtml += `<div class="spp-section">
+      <div class="spp-section-title">CLAUDE.md</div>
+      <pre class="spp-content">${escapeHtml(data.content)}</pre>
+    </div>`;
+  }
+  if (data.shared_instructions) {
+    sectionsHtml += `<div class="spp-section">
+      <div class="spp-section-title">共通指示 (shared_instructions.md)</div>
+      <pre class="spp-content">${escapeHtml(data.shared_instructions)}</pre>
+    </div>`;
+  }
+
+  const preview = document.createElement('div');
+  preview.className = 'system-prompt-preview';
+  preview.innerHTML = `
+    <div class="spp-header" onclick="this.closest('.system-prompt-preview').classList.toggle('expanded')">
+      <span class="spp-icon">&#9881;</span>
+      <span class="spp-label">注入されるプロンプト</span>
+      <span class="spp-chevron">&#9660;</span>
+    </div>
+    <div class="spp-body">${sectionsHtml}</div>`;
+
+  host.appendChild(preview);
+}
+
 // ============================================================
 // タブ切り替え
 // ============================================================
@@ -952,6 +1038,7 @@ function switchTab(tabName) {
     if (!currentSessionId) chatPane.classList.add('hidden');
     loadReports();
   } else if (tabName === 'settings') {
+    document.querySelector('.layout').classList.remove('mobile-chat-active');
     settingsContent.classList.add('visible');
     chatPane.classList.add('hidden');
     settingsPane.classList.add('visible');
@@ -1292,6 +1379,7 @@ function initReports() {
       currentSessionId = null;
       clearChat();
       activateSessionContainer(null);
+      showSystemPromptPreview(currentAgentId);
       document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
       switchTab('chat');
     }
@@ -1318,7 +1406,7 @@ async function loadSettingsData() {
 
   document.querySelector('[data-field="name"]').value = agent.name || '';
   document.querySelector('[data-field="description"]').value = agent.description || '';
-  document.querySelector('[data-field="model_tier"]').value = agent.model_tier || 'deep';
+  document.querySelector('[data-field="model_tier"]').value = agent.model_tier || 'quick';
   document.querySelector('[data-field="path"]').value = agent.path || '';
   document.getElementById('settings-pane-header').textContent = `${agent.name} — AI設定 (CLAUDE.md)`;
 
@@ -1330,7 +1418,7 @@ async function loadSettingsData() {
   const preview = document.getElementById('settings-avatar-preview');
   const removeBtn = document.getElementById('thumbnail-remove-btn');
   if (agent.thumbnail_url) {
-    preview.innerHTML = `<img src="${agent.thumbnail_url}?t=${Date.now()}" alt="">`;
+    preview.innerHTML = `<img src="${agent.thumbnail_url}" alt="">`;
     removeBtn.style.display = '';
   } else {
     preview.innerHTML = `<div class="agent-avatar settings-avatar-large">${escapeHtml(agent.name.charAt(0))}</div>`;
@@ -1355,18 +1443,24 @@ async function loadSchedulerLogs() {
   el.innerHTML = logs.map(log => {
     const dateStr = formatDate(log.timestamp);
     const progress = log.total_after > 0 ? `${log.checked_after}/${log.total_after}` : '—';
-    const sessionShort = log.session_id ? log.session_id.slice(0, 8) : '—';
+    const logAgent = agents.find(a => a.id === log.agent_id);
+    const agentAvatarHtml = logAgent?.thumbnail_url
+      ? `<img src="${logAgent.thumbnail_url}" class="slog-avatar" alt="">`
+      : `<div class="slog-avatar slog-avatar-letter">${escapeHtml((logAgent?.name || '?').charAt(0))}</div>`;
     const stepsHtml = (log.completed_steps && log.completed_steps.length > 0)
       ? log.completed_steps.map(s => `<div class="slog-step">✓ ${escapeHtml(s)}</div>`).join('')
       : `<span class="slog-unchanged">${escapeHtml(log.current_step || '—')} の作業中</span>`;
     const errHtml = log.error ? `<div class="slog-error">${escapeHtml(log.error)}</div>` : '';
+    const sessionTitle = log.session_id
+      ? (sessions.find(s => s.session_id === log.session_id)?.title || '作業セッション')
+      : null;
     const sessionLink = log.session_id
-      ? `<a class="slog-link" data-session-id="${log.session_id}">session: ${sessionShort}</a>`
+      ? `<a class="slog-link" data-session-id="${log.session_id}" title="${log.session_id}">作業セッション: ${escapeHtml(sessionTitle)}</a>`
       : '—';
     return `<div class="scheduler-log-entry${log.error ? ' slog-has-error' : ''}">
       <div class="slog-header">
+        ${agentAvatarHtml}
         <span class="slog-time">${dateStr}</span>
-        <span class="slog-agent">${escapeHtml(log.agent_name || log.agent_id || '—')}</span>
         <a class="slog-link slog-title" data-task-id="${log.task_id}">${escapeHtml(log.task_title || log.task_id)}</a>
         <span class="slog-progress">${progress}</span>
       </div>
@@ -1424,7 +1518,15 @@ function initActions() {
     document.querySelector('.layout').classList.remove('mobile-chat-active');
   });
   document.getElementById('settings-back-btn').addEventListener('click', () => {
-    switchTab('chat');
+    if (window.innerWidth <= 600) {
+      switchTab('settings');
+    } else {
+      switchTab('chat');
+    }
+  });
+
+  document.getElementById('open-claude-md-btn').addEventListener('click', () => {
+    document.querySelector('.layout').classList.add('mobile-chat-active');
   });
 
   // 設定保存（中央ペイン）
@@ -1559,6 +1661,7 @@ function initActions() {
     currentSessionId = null;
     clearChat();
     activateSessionContainer(null); // 新規入力用の空コンテナを表示
+    showSystemPromptPreview(currentAgentId);
     document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
     // モバイル: チャット画面に切り替え
     if (isMobile()) {
@@ -1734,7 +1837,7 @@ function renderTaskList() {
     queueIdx++;
     const active = id === currentTaskId ? ' active' : '';
     const indicator = task.phase === 'doing'
-      ? '<span class="doing-indicator"><span class="dot"></span>実行中</span>'
+      ? '<span class="doing-indicator"><span class="dot"></span>作業中</span>'
       : '';
     html += `
       <div class="task-item draggable${active}" data-task-id="${id}" data-row-id="${id}" draggable="true">
@@ -1862,9 +1965,9 @@ async function renderTaskDetail(taskId) {
     approvalHtml = `<div class="approval-status-badge approved">✓ 承認済み${dt ? ' (' + dt + ')' : ''}</div>`;
   }
 
-  const phaseLabel = { draft: '未着手', doing: '実行中', done: '完了' }[task.phase] ?? task.phase;
+  const phaseLabel = { draft: '未着手', doing: '作業中', done: '完了' }[task.phase] ?? task.phase;
   const phaseBadge = task.phase === 'doing'
-    ? '<span class="doing-indicator"><span class="dot"></span>実行中</span>'
+    ? '<span class="doing-indicator"><span class="dot"></span>作業中</span>'
     : task.phase === 'done'
     ? '<span class="badge badge-done">完了</span>'
     : '';
@@ -1987,9 +2090,14 @@ const _DOW = ['日','月','火','水','木','金','土'];
 function formatDate(input) {
   const d = new Date(input);
   const now = new Date();
+  const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((today - dDay) / 86400000);
+  if (diffDays === 0) return `今日 ${time}`;
+  if (diffDays === 1) return `昨日 ${time}`;
   const year = d.getFullYear() !== now.getFullYear() ? `${d.getFullYear()}/` : '';
   const date = `${d.getMonth() + 1}/${d.getDate()}${_DOW[d.getDay()]}`;
-  const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
   return `${year}${date} ${time}`;
 }
 
@@ -2099,7 +2207,7 @@ function initScheduler() {
   btn.addEventListener('click', async () => {
     const label = document.getElementById('scheduler-label').textContent;
     const next = label === 'ON' ? 'OFF' : 'ON';
-    if (!confirm(`スケジューラーを${next}にしますか？`)) return;
+    if (!confirm(`自律作業を${next}にしますか？`)) return;
     try {
       const resp = await fetch(`${API}/scheduler/toggle`, { method: 'POST' });
       if (resp.ok) {
@@ -2128,17 +2236,25 @@ function updateSchedulerUI(data) {
   const btn = document.getElementById('scheduler-toggle-btn');
   const indicator = document.getElementById('scheduler-indicator');
   const label = document.getElementById('scheduler-label');
+  const nextRunEl = document.getElementById('scheduler-next-run');
 
   if (data.enabled) {
     btn.classList.add('on');
     indicator.classList.remove('off');
     indicator.classList.add('on');
     label.textContent = 'ON';
+    if (data.next_run && nextRunEl) {
+      const d = new Date(data.next_run);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      nextRunEl.textContent = `${hh}:${mm}`;
+    }
   } else {
     btn.classList.remove('on');
     indicator.classList.remove('on');
     indicator.classList.add('off');
     label.textContent = 'OFF';
+    if (nextRunEl) nextRunEl.textContent = '';
   }
 }
 
@@ -2159,7 +2275,7 @@ function initAddAgent() {
     document.getElementById('add-agent-path').value = '';
     document.getElementById('add-agent-description').value = '';
     document.getElementById('add-agent-cli').value = 'claude';
-    document.getElementById('add-agent-model-tier').value = 'deep';
+    document.getElementById('add-agent-model-tier').value = 'quick';
     pane.style.display = 'flex';
   }
 

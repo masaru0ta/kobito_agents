@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>kobito_agents</title>
-<link rel="stylesheet" href="/style.css?v=12">
+<link rel="stylesheet" href="/style.css?v=19">
 <link rel="stylesheet" href="/highlight-github-dark.min.css">
 </head>
 <body>
@@ -21,9 +21,10 @@
       <button class="restart-btn" id="restart-btn">&#x21bb; サーバー再起動</button>
       <button class="scheduler-toggle-btn" id="scheduler-toggle-btn">
         <span class="scheduler-indicator off" id="scheduler-indicator"></span>
-        スケジューラー <span id="scheduler-label">OFF</span>
+        自律作業 <span id="scheduler-label">OFF</span>
+        <span class="scheduler-next-run" id="scheduler-next-run"></span>
       </button>
-      <button class="scheduler-log-btn" id="scheduler-log-btn">スケジューラーログ</button>
+      <button class="scheduler-log-btn" id="scheduler-log-btn">自律作業ログ</button>
     </div>
   </div>
 
@@ -34,7 +35,7 @@
       <div class="tab active" data-tab="chat">セッション</div>
       <div class="tab" data-tab="tasks">タスク</div>
       <div class="tab" data-tab="reports">ファイル</div>
-      <div class="tab" data-tab="settings">設定</div>
+      <div class="tab" data-tab="settings">⚙</div>
     </div>
 
     <!-- 会話タブ -->
@@ -107,8 +108,8 @@
       <div class="settings-section">
         <label>モデル</label>
         <select class="settings-input" data-field="model_tier">
-          <option value="deep">深い思考（opus）</option>
-          <option value="quick">軽い即答（sonnet）</option>
+          <option value="quick">sonnet（標準）</option>
+          <option value="deep">opus（高精度）</option>
         </select>
       </div>
       <div class="settings-section">
@@ -117,6 +118,9 @@
       </div>
       <div class="settings-section">
         <button class="settings-save-btn" id="settings-save-btn">保存</button>
+      </div>
+      <div class="settings-section settings-claude-md-btn-wrap">
+        <button class="settings-save-btn" id="open-claude-md-btn">AI設定 (CLAUDE.md) を編集</button>
       </div>
       <div class="settings-section settings-danger-zone" id="danger-zone" style="display:none;">
         <label>危険な操作</label>
@@ -153,8 +157,8 @@
         <div class="settings-section">
           <label>モデル</label>
           <select class="settings-input" id="add-agent-model-tier">
-            <option value="deep">深い思考（opus）</option>
-            <option value="quick">軽い即答（sonnet）</option>
+            <option value="quick">sonnet（標準）</option>
+            <option value="deep">opus（高精度）</option>
           </select>
         </div>
         <div class="settings-section" style="display:flex; gap:8px;">
@@ -168,7 +172,7 @@
     <div id="scheduler-log-pane" style="display:none; position:absolute; inset:0; z-index:10; background:var(--bg-secondary); flex-direction:column;">
       <div class="task-detail-header" style="display:flex; align-items:center; gap:8px;">
         <button class="task-back-btn" id="scheduler-log-back-btn">←</button>
-        <span style="font-weight:600; font-size:14px; flex:1;">スケジューラーログ</span>
+        <span style="font-weight:600; font-size:14px; flex:1;">自律作業ログ</span>
         <button class="task-back-btn" id="scheduler-log-refresh-btn">↻</button>
       </div>
       <div id="scheduler-log-list" style="flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:6px;"></div>
@@ -200,6 +204,7 @@
         </div>
       </div>
     </div>
+    <div id="system-prompt-preview-host"></div>
     <div id="chat-messages-host"></div>
     <div class="chat-input-area">
       <div class="chat-input-wrapper">
@@ -247,6 +252,6 @@
 
 <script src="/marked.min.js"></script>
 <script src="/highlight.min.js"></script>
-<script src="/app.js?v=12"></script>
+<script src="/app.js?v=19"></script>
 </body>
 </html>

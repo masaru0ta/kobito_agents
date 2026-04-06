@@ -24,6 +24,7 @@ class SessionSummary(BaseModel):
     last_message: str
     title: str = ""
     model_tier: str = ""
+    initiated_by: str = ""
 
 
 class SessionReader(ABC):
@@ -45,6 +46,8 @@ class ClaudeSessionReader(SessionReader):
         if claude_home is None:
             claude_home = Path.home() / ".claude"
         self._claude_home = claude_home
+        # { jsonl_path_str: (mtime, SessionSummary) } — ファイル変化時のみ再パース
+        self._summary_cache: dict[str, tuple[float, SessionSummary | None]] = {}
 
     def get_project_hash(self, project_path: str) -> str:
         """プロジェクトパスからClaude Codeのproject_hashを算出する"""
@@ -141,6 +144,27 @@ class ClaudeSessionReader(SessionReader):
                 ))
         return messages
 
+    def _parse_summary(self, jsonl_path: Path, project_path: str) -> SessionSummary | None:
+        """1ファイルを全パースしてSummaryを返す（キャッシュなし）"""
+        session_id = jsonl_path.stem
+        meta = self._load_meta(project_path, session_id)
+        if meta.get("hidden"):
+            return None
+        events = self._parse_jsonl(jsonl_path)
+        messages = self._extract_messages(events)
+        if not messages:
+            return None
+        return SessionSummary(
+            session_id=session_id,
+            created_at=messages[0].timestamp,
+            updated_at=messages[-1].timestamp,
+            message_count=len(messages),
+            last_message=messages[-1].content[:100],
+            title=meta.get("title", ""),
+            model_tier=meta.get("model_tier", ""),
+            initiated_by=meta.get("initiated_by", ""),
+        )
+
     def list_sessions(self, project_path: str) -> list[SessionSummary]:
         sessions_dir = self._sessions_dir(project_path)
         if not sessions_dir.exists():
@@ -148,28 +172,16 @@ class ClaudeSessionReader(SessionReader):
 
         summaries = []
         for jsonl_path in sessions_dir.glob("*.jsonl"):
-            session_id = jsonl_path.stem
-
-            # 非表示チェック
-            meta = self._load_meta(project_path, session_id)
-            if meta.get("hidden"):
-                continue
-
-            events = self._parse_jsonl(jsonl_path)
-            messages = self._extract_messages(events)
-
-            if not messages:
-                continue
-
-            summaries.append(SessionSummary(
-                session_id=session_id,
-                created_at=messages[0].timestamp,
-                updated_at=messages[-1].timestamp,
-                message_count=len(messages),
-                last_message=messages[-1].content[:100],
-                title=meta.get("title", ""),
-                model_tier=meta.get("model_tier", ""),
-            ))
+            mtime = jsonl_path.stat().st_mtime
+            key = str(jsonl_path)
+            cached = self._summary_cache.get(key)
+            if cached and cached[0] == mtime:
+                summary = cached[1]
+            else:
+                summary = self._parse_summary(jsonl_path, project_path)
+                self._summary_cache[key] = (mtime, summary)
+            if summary:
+                summaries.append(summary)
 
         summaries.sort(key=lambda s: s.updated_at, reverse=True)
         return summaries
