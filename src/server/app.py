@@ -21,6 +21,7 @@ from server.routes.tasks import router as tasks_router
 from server.routes.reports import router as reports_router
 from server.routes.file_links import router as file_links_router
 from server.routes.scheduler import router as scheduler_router
+from server.routes.internal import router as internal_router
 from server.scheduler import Scheduler
 
 
@@ -83,6 +84,7 @@ def create_app(
     app.include_router(reports_router)
     app.include_router(file_links_router)
     app.include_router(scheduler_router)
+    app.include_router(internal_router)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

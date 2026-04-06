@@ -31,6 +31,49 @@ logger = logging.getLogger(__name__)
 # 共通指示ファイル（全エージェントの新規セッションに自動注入）
 _SHARED_INSTRUCTIONS_FILE = Path(__file__).resolve().parents[2] / "assets" / "prompts" / "shared_instructions.md"
 
+# MCP設定ファイル
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_MCP_CONFIG_DIR = _PROJECT_ROOT / "data" / "mcp_configs"
+
+
+def _get_kobito_url() -> str:
+    """KOBITO_URL を環境変数 → 旧設定ファイルの順で解決する"""
+    import os
+    url = os.environ.get("KOBITO_URL", "")
+    if url:
+        return url
+    legacy = _PROJECT_ROOT / "data" / "mcp_config.json"
+    if legacy.exists():
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+            url = data["mcpServers"]["kobito"]["env"]["KOBITO_URL"]
+            if url:
+                return url
+        except (KeyError, ValueError):
+            pass
+    return "http://localhost:3956"
+
+
+def _ensure_mcp_config(agent_id: str) -> Path:
+    """エージェントIDごとの MCP 設定ファイルを生成/更新する"""
+    _MCP_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    path = _MCP_CONFIG_DIR / f"mcp_{agent_id}.json"
+    config = {
+        "mcpServers": {
+            "kobito": {
+                "command": "python",
+                "args": [str(_PROJECT_ROOT / "src" / "mcp_server" / "ask_agent.py")],
+                "cwd": str(_PROJECT_ROOT),
+                "env": {
+                    "KOBITO_URL": _get_kobito_url(),
+                    "KOBITO_AGENT_ID": agent_id,
+                },
+            }
+        }
+    }
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
 # モデルティアからモデル名へのマッピング
 MODEL_MAP = {
     "claude": {
@@ -304,11 +347,14 @@ class CLIBridge:
         self,
         model: str,
         session_id: str | None = None,
+        extra_system_prompt_file: Path | None = None,
+        agent_id: str = "",
     ) -> list[str]:
         """CLIコマンドを構築する。
         CLAUDE.md は Claude Code が cwd から自動検出するため --system-prompt は使わない。
         共通指示のみ --append-system-prompt-file で追加注入する。
         """
+        mcp_config = _ensure_mcp_config(agent_id)
         cmd = [
             self._find_claude(),
             "-p", "",
@@ -316,12 +362,15 @@ class CLIBridge:
             "--output-format", "stream-json",
             "--verbose",
             "--model", model,
+            "--mcp-config", str(mcp_config),
         ]
         if session_id:
             cmd.extend(["--resume", session_id])
         else:
             if _SHARED_INSTRUCTIONS_FILE.exists():
                 cmd.extend(["--append-system-prompt-file", str(_SHARED_INSTRUCTIONS_FILE)])
+            if extra_system_prompt_file and extra_system_prompt_file.exists():
+                cmd.extend(["--append-system-prompt-file", str(extra_system_prompt_file)])
         return cmd
 
     def _spawn_process(self, project_path: str, cmd: list[str]) -> subprocess.Popen:
@@ -342,6 +391,8 @@ class CLIBridge:
         project_path: str,
         model: str,
         session_id: str | None,
+        extra_system_prompt_file: Path | None = None,
+        agent_id: str = "",
     ) -> tuple[ManagedProcess, str]:
         """既存プロセスを取得、またはなければ新規作成"""
         key = self._pool_key(project_path, session_id)
@@ -366,7 +417,7 @@ class CLIBridge:
                 return mp, key
 
             # 新規作成
-            cmd = self._build_command(model, session_id)
+            cmd = self._build_command(model, session_id, extra_system_prompt_file, agent_id)
             proc = self._spawn_process(project_path, cmd)
             mp = ManagedProcess(proc=proc, model=model, session_id=session_id or "", project_path=project_path)
             loop = asyncio.get_running_loop()
@@ -388,10 +439,12 @@ class CLIBridge:
         prompt: str,
         model: str,
         session_id: str | None = None,
+        extra_system_prompt_file: Path | None = None,
+        agent_id: str = "",
     ) -> AsyncGenerator[dict, None]:
         """メッセージを送信し、resultイベントまでのストリームをyieldする"""
         mp, key = await self._get_or_create_process(
-            project_path, model, session_id,
+            project_path, model, session_id, extra_system_prompt_file, agent_id,
         )
 
         async with mp.lock:

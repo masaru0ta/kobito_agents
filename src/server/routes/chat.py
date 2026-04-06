@@ -123,6 +123,7 @@ async def send_chat(
                 prompt=prompt,
                 model=model,
                 session_id=body.session_id,
+                agent_id=agent_id,
             )
             async for raw_event in stream:
                 # _ping は接続維持のためのダミーイベント（15秒無応答時にrun_stream側で生成）

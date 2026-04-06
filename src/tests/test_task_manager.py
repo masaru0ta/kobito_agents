@@ -109,7 +109,8 @@ class TestListTasks:
         task = tm.list_tasks()[0]
         assert task.title == "テストタスク"
         assert task.agent == "system"
-        assert task.phase == "draft"
+        # チェック済みチェックボックスがあるため _infer_phase により "doing"
+        assert task.phase == "doing"
         assert task.approval == "pending"
 
     def test_メタデータファイルが自動生成される(self, tmp_path):

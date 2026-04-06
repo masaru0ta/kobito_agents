@@ -68,7 +68,7 @@ class Scheduler:
 
         # 公開状態（前回の設定を復元）
         self.enabled: bool = config_manager.get_setting("scheduler_enabled", False)
-        self.running: bool = False
+        self.running: set[str] = set()  # 実行中エージェントIDのセット
         self.last_run: datetime | None = None
         self.next_run: datetime | None = None
 
@@ -145,7 +145,8 @@ class Scheduler:
         """現在の状態を辞書で返す"""
         return {
             "enabled": self.enabled,
-            "running": self.running,
+            "running": bool(self.running),
+            "running_agents": list(self.running),
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "next_run": self.next_run.isoformat() if self.next_run else None,
         }
@@ -180,54 +181,48 @@ class Scheduler:
         if not self.enabled:
             return
 
-        if self.running:
-            logger.info("スケジューラー: 前回セッション実行中のためスキップ")
-            return
+        now = datetime.now(timezone.utc)
+        self.last_run = now
+        self.next_run = now + timedelta(seconds=self._interval)
 
-        # タスク選定
-        target = self._select_task()
-        if target is None:
+        # アイドル状態の各エージェントのタスクを並行起動
+        targets = self._select_tasks()
+        if not targets:
             logger.info("スケジューラー: 実行対象タスクなし")
-            self.last_run = datetime.now(timezone.utc)
-            self.next_run = datetime.now(timezone.utc) + timedelta(seconds=self._interval)
             return
 
-        task, agent_path, agent = target
-        logger.info(f"スケジューラー: タスク '{task.task_id}' を実行開始")
-
-        self.running = True
-        self.last_run = datetime.now(timezone.utc)
-        self.next_run = datetime.now(timezone.utc) + timedelta(seconds=self._interval)
-
-        # セッション実行（running フラグで二重実行を防止）
-        await self._run_session(task.task_id, agent_path, agent, self.last_run)
+        for task, agent_path, agent in targets:
+            logger.info(f"スケジューラー: タスク '{task.task_id}' ({agent.name}) を実行開始")
+            self.running.add(agent.id)
+            asyncio.create_task(self._run_session(task.task_id, agent_path, agent, now))
 
     # ----------------------------------------------------------------
     # タスク選定
     # ----------------------------------------------------------------
 
-    def _select_task(self) -> tuple | None:
-        """task_order.json を先頭から走査し、実行可能な最初のタスクを返す。
+    def _select_tasks(self) -> list[tuple]:
+        """アイドル状態の各エージェントの次タスクを返す。
 
         Returns:
-            (Task, agent_path, AgentInfo) or None
+            [(Task, agent_path, AgentInfo), ...]
         """
-        agents = self._config_manager.list_agents()
-        for agent in agents:
+        result = []
+        for agent in self._config_manager.list_agents():
+            if agent.id in self.running:
+                continue  # 既に実行中のエージェントはスキップ
             tm = TaskManager(agent.path)
-            order = tm.get_order()
-            for task_id in order:
+            for task_id in tm.get_order():
                 try:
                     task = tm.get_task(task_id)
                 except FileNotFoundError:
                     continue
-                # 承認済みかつ未完了
                 if task.approval != "approved":
                     continue
                 if task.phase == "done":
                     continue
-                return (task, agent.path, agent)
-        return None
+                result.append((task, agent.path, agent))
+                break  # エージェントごとに1タスク
+        return result
 
     # ----------------------------------------------------------------
     # セッション実行
@@ -311,5 +306,5 @@ class Scheduler:
             logger.error(f"スケジューラー: セッション実行エラー: {e}", exc_info=True)
         finally:
             self._append_log(log_entry)
-            self.running = False
-            logger.info("スケジューラー: 実行中フラグ解除")
+            self.running.discard(agent.id)
+            logger.info(f"スケジューラー: {agent.name} 実行中フラグ解除")

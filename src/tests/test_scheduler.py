@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -120,6 +120,9 @@ def mock_config(project_dir):
         cli="claude", model_tier="deep", system_prompt="",
     )
     config.list_agents.return_value = [config.get_agent.return_value]
+    config.get_setting.return_value = False
+    config.set_setting = MagicMock()
+    config._data_dir = str(project_dir / ".kobito")
     return config
 
 
@@ -144,7 +147,7 @@ class TestSchedulerInit:
             config_manager=mock_config,
             cli_bridge=mock_bridge,
         )
-        assert sched.running is False
+        assert not sched.running
 
     def test_起動時にlast_runがNone(self, project_dir, mock_bridge, mock_config):
         from server.scheduler import Scheduler
@@ -170,26 +173,30 @@ class TestSchedulerInit:
 class TestSchedulerToggle:
     """トグル操作"""
 
-    def test_トグルでONになる(self, project_dir, mock_bridge, mock_config):
+    @patch("server.scheduler.asyncio.create_task")
+    def test_トグルでONになる(self, mock_create_task, project_dir, mock_bridge, mock_config):
         from server.scheduler import Scheduler
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
         sched.toggle()
         assert sched.enabled is True
 
-    def test_トグル2回でOFFに戻る(self, project_dir, mock_bridge, mock_config):
+    @patch("server.scheduler.asyncio.create_task")
+    def test_トグル2回でOFFに戻る(self, mock_create_task, project_dir, mock_bridge, mock_config):
         from server.scheduler import Scheduler
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
         sched.toggle()
         sched.toggle()
         assert sched.enabled is False
 
-    def test_ONにするとnext_runが設定される(self, project_dir, mock_bridge, mock_config):
+    @patch("server.scheduler.asyncio.create_task")
+    def test_ONにするとnext_runが設定される(self, mock_create_task, project_dir, mock_bridge, mock_config):
         from server.scheduler import Scheduler
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
         sched.toggle()
         assert sched.next_run is not None
 
-    def test_OFFにするとnext_runがNoneに戻る(self, project_dir, mock_bridge, mock_config):
+    @patch("server.scheduler.asyncio.create_task")
+    def test_OFFにするとnext_runがNoneに戻る(self, mock_create_task, project_dir, mock_bridge, mock_config):
         from server.scheduler import Scheduler
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
         sched.toggle()  # ON
@@ -222,8 +229,9 @@ class TestSchedulerTick:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()  # ON
-        sched.running = True  # 実行中フラグを手動で立てる
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()  # ON
+        sched.running.add("system")  # 実行中フラグを手動で立てる
         await sched.tick()
         mock_bridge.run_stream.assert_not_called()
 
@@ -236,10 +244,18 @@ class TestSchedulerTick:
         _write_order(project_dir, ["task_001", "task_002"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()  # ON
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()  # ON
 
-        # run_stream が呼ばれ、prompt に task_001 のコンテキストが含まれる
+        # tick内のcreate_taskで_run_sessionが起動されるので、直接呼ぶ
+        # _select_tasksで対象を取得してから_run_sessionを直接awaitする
+        targets = sched._select_tasks()
+        assert len(targets) >= 1
+        task, agent_path, agent = targets[0]
+        assert "承認済みタスク" in task.title
+
+        # run_streamが呼ばれることを確認
+        await sched._run_session(task.task_id, agent_path, agent, datetime.now(timezone.utc))
         mock_bridge.run_stream.assert_called_once()
         call_kwargs = mock_bridge.run_stream.call_args.kwargs
         assert "承認済みタスク" in call_kwargs["prompt"]
@@ -252,11 +268,12 @@ class TestSchedulerTick:
         _write_order(project_dir, ["task_pending", "task_approved"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
 
-        # task_pending はスキップされ、task_approved が実行される
-        mock_bridge.run_stream.assert_called_once()
+        targets = sched._select_tasks()
+        assert len(targets) == 1
+        assert targets[0][0].task_id == "task_approved"
 
     @pytest.mark.asyncio
     async def test_doneタスクはスキップ(self, project_dir, mock_bridge, mock_config):
@@ -266,10 +283,12 @@ class TestSchedulerTick:
         _write_order(project_dir, ["task_done", "task_active"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
 
-        mock_bridge.run_stream.assert_called_once()
+        targets = sched._select_tasks()
+        assert len(targets) == 1
+        assert targets[0][0].task_id == "task_active"
 
     @pytest.mark.asyncio
     async def test_条件を満たすタスクがない場合何も実行しない(self, project_dir, mock_bridge, mock_config):
@@ -279,7 +298,8 @@ class TestSchedulerTick:
         _write_order(project_dir, ["task_done", "task_pending"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
         await sched.tick()
 
         mock_bridge.run_stream.assert_not_called()
@@ -290,7 +310,8 @@ class TestSchedulerTick:
         _write_order(project_dir, [])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
         await sched.tick()
 
         mock_bridge.run_stream.assert_not_called()
@@ -310,9 +331,12 @@ class TestSchedulerSession:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
 
+        targets = sched._select_tasks()
+        task, agent_path, agent = targets[0]
+        await sched._run_session(task.task_id, agent_path, agent, datetime.now(timezone.utc))
         mock_bridge.run_stream.assert_called_once()
 
     @pytest.mark.asyncio
@@ -322,8 +346,12 @@ class TestSchedulerSession:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
+
+        targets = sched._select_tasks()
+        task, agent_path, agent = targets[0]
+        await sched._run_session(task.task_id, agent_path, agent, datetime.now(timezone.utc))
 
         call_kwargs = mock_bridge.run_stream.call_args.kwargs
         prompt = call_kwargs["prompt"]
@@ -338,8 +366,12 @@ class TestSchedulerSession:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
+
+        targets = sched._select_tasks()
+        task, agent_path, agent = targets[0]
+        await sched._run_session(task.task_id, agent_path, agent, datetime.now(timezone.utc))
 
         meta = _read_meta(project_dir, "task_001")
         assert "sess_auto_001" in meta["sessions"]
@@ -351,11 +383,16 @@ class TestSchedulerSession:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
 
-        # fake_stream は result イベント（= done）を返すので、完了後 running は False
-        assert sched.running is False
+        targets = sched._select_tasks()
+        task, agent_path, agent = targets[0]
+        sched.running.add(agent.id)
+        await sched._run_session(task.task_id, agent_path, agent, datetime.now(timezone.utc))
+
+        # _run_session完了後にrunningから除去される
+        assert agent.id not in sched.running
 
 
 # ================================================================
@@ -372,9 +409,12 @@ class TestSchedulerState:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
+
         before = datetime.now(timezone.utc)
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            await sched.tick()
 
         assert sched.last_run is not None
         assert sched.last_run >= before
@@ -386,8 +426,11 @@ class TestSchedulerState:
         _write_order(project_dir, ["task_001"])
 
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
-        await sched.tick()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
+
+        with patch("server.scheduler.asyncio.create_task"):
+            await sched.tick()
 
         # tick後もON状態なので next_run は last_run + 10分
         assert sched.next_run is not None
@@ -399,7 +442,8 @@ class TestSchedulerState:
     async def test_サーバー停止時にタイマーループが正常終了する(self, project_dir, mock_bridge, mock_config):
         from server.scheduler import Scheduler
         sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
-        sched.toggle()
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()
 
         # ループ開始（即座にキャンセル）
         loop_task = asyncio.create_task(sched.run_loop())

@@ -97,6 +97,7 @@ body {
 .conv-title { font-size: 14px; color: var(--accent); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
 .conv-initiated-by { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
 .conv-badge-link { font-size: 12px; margin-right: 4px; }
+.conv-badge-thumb { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
 .conv-preview { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-status { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .conv-status .spinner { width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -167,11 +168,7 @@ body {
 .msg-body { display: flex; flex-direction: column; min-width: 0; }
 .message-sender { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; padding: 0 4px; }
 .message-bubble { padding: 5px 8px; border-radius: 12px; font-size: 14px; line-height: 1.6; word-break: break-word; max-width: 100%; }
-.message.user .message-bubble { background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px; }
-.message.user .cmd-bubble { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); display: flex; align-items: center; gap: 6px; padding: 5px 10px; }
-.cmd-name { font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; color: var(--accent); font-weight: 600; }
-.cmd-args { font-size: 13px; color: var(--text-primary); }
-.message.assistant .message-bubble { background: var(--assistant-bg); color: var(--text-primary); border-bottom-left-radius: 4px; }
+.message.user .message-bubble { background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px; }.message.assistant .message-bubble { background: var(--assistant-bg); color: var(--text-primary); border-bottom-left-radius: 4px; }
 .message-bubble ul, .message-bubble ol { padding-left: 1.5em; margin: 0.4em 0; }
 .message-bubble li { margin: 0.2em 0; }
 .message-bubble h1, .message-bubble h2, .message-bubble h3, .message-bubble h4 { color: var(--accent); margin: 0.6em 0 0.3em; }

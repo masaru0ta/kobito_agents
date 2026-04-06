@@ -39,3 +39,13 @@ created: YYYY-MM-DD
 
 - 作業完了したステップは `- [x]` に更新する
 - 全ステップ完了時に frontmatter の `phase` を `done` に更新する
+
+## AI間通信
+
+`ask_agent` ツールを使うと、他のエージェントに質問できる。
+
+- `ask_agent(agent_id, message)` — 新規会話を開始
+- `ask_agent(agent_id, message, session_id)` — 既存会話を継続
+
+返却される `session_id` を保持すれば、同じ相手と継続的に会話できる。
+自分自身に送信することはできない。

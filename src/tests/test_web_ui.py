@@ -213,44 +213,34 @@ class TestSettingsTab:
 
     def test_設定タブに切り替えできる(self, test_env, page):
         page.goto(test_env["url"])
-        page.wait_for_selector(".tab")
+        page.wait_for_selector(".tab[data-tab='settings']")
 
-        tabs = page.query_selector_all(".tab")
-        settings_tab = [t for t in tabs if "設定" in t.text_content()][0]
-        settings_tab.click()
-
+        page.query_selector(".tab[data-tab='settings']").click()
         page.wait_for_selector("#settings-tab-content.visible, .settings-content.visible")
 
     def test_名前が表示される(self, test_env, page):
         page.goto(test_env["url"])
-        page.wait_for_selector(".tab")
+        page.wait_for_selector(".tab[data-tab='settings']")
 
-        # 設定タブに切り替え
-        tabs = page.query_selector_all(".tab")
-        [t for t in tabs if "設定" in t.text_content()][0].click()
-
+        page.query_selector(".tab[data-tab='settings']").click()
         page.wait_for_selector("input[data-field='name']")
         name_input = page.query_selector("input[data-field='name']")
         assert name_input.input_value() == "レプリカ"
 
     def test_CLAUDE_mdが編集エリアに表示される(self, test_env, page):
         page.goto(test_env["url"])
-        page.wait_for_selector(".tab")
+        page.wait_for_selector(".tab[data-tab='settings']")
 
-        tabs = page.query_selector_all(".tab")
-        [t for t in tabs if "設定" in t.text_content()][0].click()
-
+        page.query_selector(".tab[data-tab='settings']").click()
         page.wait_for_selector("textarea[data-field='system-prompt']")
         textarea = page.query_selector("textarea[data-field='system-prompt']")
         assert "テストプロジェクト" in textarea.input_value()
 
     def test_model_tier選択が表示される(self, test_env, page):
         page.goto(test_env["url"])
-        page.wait_for_selector(".tab")
+        page.wait_for_selector(".tab[data-tab='settings']")
 
-        tabs = page.query_selector_all(".tab")
-        [t for t in tabs if "設定" in t.text_content()][0].click()
-
+        page.query_selector(".tab[data-tab='settings']").click()
         page.wait_for_selector("select[data-field='model_tier']")
         select = page.query_selector("select[data-field='model_tier']")
         assert select is not None
@@ -315,24 +305,32 @@ class TestResize:
 
 
 class TestChatActions:
-    """チャットヘッダーのアクション"""
+    """チャットヘッダーのアクション（メニュー内）"""
 
     def test_非表示ボタンが存在する(self, test_env, page):
         page.goto(test_env["url"])
         page.wait_for_selector(".conversation-item")
         page.query_selector(".conversation-item").click()
-        page.wait_for_selector(".chat-action-btn")
+        page.wait_for_selector("#chat-menu-btn")
 
-        btns = page.query_selector_all(".chat-action-btn")
-        texts = [b.text_content() for b in btns]
-        assert "非表示" in texts
+        # メニューを開く
+        page.query_selector("#chat-menu-btn").click()
+        page.wait_for_selector("#btn-hide")
+
+        btn = page.query_selector("#btn-hide")
+        assert btn is not None
+        assert "非表示" in btn.text_content()
 
     def test_CLI起動ボタンが存在する(self, test_env, page):
         page.goto(test_env["url"])
         page.wait_for_selector(".conversation-item")
         page.query_selector(".conversation-item").click()
-        page.wait_for_selector(".chat-action-btn")
+        page.wait_for_selector("#chat-menu-btn")
 
-        btns = page.query_selector_all(".chat-action-btn")
-        texts = [b.text_content() for b in btns]
-        assert "CLI起動" in texts
+        # メニューを開く
+        page.query_selector("#chat-menu-btn").click()
+        page.wait_for_selector("#btn-cli")
+
+        btn = page.query_selector("#btn-cli")
+        assert btn is not None
+        assert "CLI" in btn.text_content()

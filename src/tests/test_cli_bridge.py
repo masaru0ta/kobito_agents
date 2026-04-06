@@ -42,6 +42,26 @@ class TestBuildCommand:
 
         assert "--append-system-prompt-file" in cmd
 
+    def test_mcp_configが含まれる(self):
+        from server.cli_bridge import CLIBridge
+
+        bridge = CLIBridge()
+        cmd = bridge._build_command(model="opus")
+
+        assert "--mcp-config" in cmd
+        # --mcp-config の次の引数がファイルパスであること
+        idx = cmd.index("--mcp-config")
+        config_path = cmd[idx + 1]
+        assert config_path.endswith("mcp_config.json")
+
+    def test_mcp_config_はresume時も含まれる(self):
+        from server.cli_bridge import CLIBridge
+
+        bridge = CLIBridge()
+        cmd = bridge._build_command(model="opus", session_id="sess-001")
+
+        assert "--mcp-config" in cmd
+
 
 class TestModelMapping:
     """モデルティアからモデル名への変換"""

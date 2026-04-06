@@ -15,7 +15,7 @@ def scheduler_status(scheduler: Scheduler = Depends(get_scheduler)):
 
 
 @router.post("/toggle")
-def scheduler_toggle(scheduler: Scheduler = Depends(get_scheduler)):
+async def scheduler_toggle(scheduler: Scheduler = Depends(get_scheduler)):
     """ON/OFF切り替え。切り替え後の状態を返す"""
     return scheduler.toggle()
 

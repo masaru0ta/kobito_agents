@@ -6,13 +6,14 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "pydantic",
+    "mcp",
+    "httpx",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "pytest-asyncio",
-    "httpx",
 ]
 
 [tool.pytest.ini_options]

@@ -17,7 +17,7 @@ class AgentInfo(BaseModel):
     path: str
     description: str = ""
     cli: str = "claude"
-    model_tier: str = "deep"
+    model_tier: str = "quick"
     system_prompt: str = ""
     thumbnail_url: str | None = None
 
@@ -54,7 +54,7 @@ class ConfigManager:
                 "path": self._system_path,
                 "description": "システム管理エージェント",
                 "cli": "claude",
-                "model_tier": "deep",
+                "model_tier": "quick",
             }
         ]
         self._write_agents(agents)
@@ -84,8 +84,10 @@ class ConfigManager:
         return None
 
     def get_thumbnail_url(self, agent_id: str) -> str | None:
-        if self.get_thumbnail_path(agent_id):
-            return f"/api/agents/{agent_id}/thumbnail"
+        p = self.get_thumbnail_path(agent_id)
+        if p:
+            v = int(p.stat().st_mtime)
+            return f"/api/agents/{agent_id}/thumbnail?v={v}"
         return None
 
     def save_thumbnail(self, agent_id: str, data: bytes, ext: str) -> None:

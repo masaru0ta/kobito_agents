@@ -105,6 +105,8 @@ async function selectAgent(agentId) {
   document.getElementById('report-detail-pane').style.display = 'none';
   document.getElementById('report-list-view').style.display = 'flex';
   loadReports();
+  // 注入プロンプトプレビューを表示
+  showSystemPromptPreview(agentId);
 }
 
 async function pollProcessStatus() {
@@ -262,7 +264,7 @@ function renderSessions(sessions) {
         <div class="conv-header">
           <span class="conv-date">${date} 更新</span>
           <span class="conv-header-right">
-            ${s.initiated_by ? '<span class="conv-badge-link">&#x1F517;</span>' : ''}
+            ${s.initiated_by ? `<img class="conv-badge-thumb" src="${API}/agents/${escapeHtml(s.initiated_by)}/thumbnail" alt="">` : ''}
             <span class="conv-count">(${s.message_count})</span>
           </span>
         </div>
@@ -282,7 +284,6 @@ function renderSessions(sessions) {
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
   lastWatchingMtime = 0; // セッション切替時にリセット
-  hideSystemPromptPreview();
   // キャッシュされたコンテナを即時表示（切替を高速化）
   activateSessionContainer(sessionId);
   // モバイル: チャット画面に切り替え
@@ -313,6 +314,7 @@ async function selectSession(sessionId) {
     }
   }
   applyModelSelectStyle(sel);
+  showSystemPromptPreview(currentAgentId);
   await loadSessionHistory(sessionId);
 }
 
@@ -438,31 +440,12 @@ function _appendMsgRange(parent, messages, from, to) {
           <div class="message-time">${time}</div>
         </div>`;
     } else {
-      const cmd = _parseCommandMessage(content);
-      if (cmd) {
-        div.innerHTML = `
-          <div class="message-bubble cmd-bubble">
-            <span class="cmd-name">${escapeHtml(cmd.name)}</span>${cmd.args ? ` <span class="cmd-args">${escapeHtml(cmd.args)}</span>` : ''}
-          </div>
-          <div class="message-time">${time}</div>`;
-      } else {
-        div.innerHTML = `
-          <div class="message-bubble">${escapeHtml(content)}</div>
-          <div class="message-time">${time}</div>`;
-      }
+      div.innerHTML = `
+        <div class="message-bubble">${escapeHtml(content)}</div>
+        <div class="message-time">${time}</div>`;
     }
     parent.appendChild(div);
   }
-}
-
-function _parseCommandMessage(content) {
-  const nameMatch = content.match(/<command-name>([^<]+)<\/command-name>/);
-  if (!nameMatch) return null;
-  const argsMatch = content.match(/<command-args>([\s\S]*?)<\/command-args>/);
-  return {
-    name: nameMatch[1].trim(),
-    args: argsMatch ? argsMatch[1].trim() : '',
-  };
 }
 
 function updateAssistantTimestamps(container) {

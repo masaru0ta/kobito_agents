@@ -105,6 +105,8 @@ async function selectAgent(agentId) {
   document.getElementById('report-detail-pane').style.display = 'none';
   document.getElementById('report-list-view').style.display = 'flex';
   loadReports();
+  // 注入プロンプトプレビューを表示
+  showSystemPromptPreview(agentId);
 }
 
 async function pollProcessStatus() {
@@ -262,7 +264,7 @@ function renderSessions(sessions) {
         <div class="conv-header">
           <span class="conv-date">${date} 更新</span>
           <span class="conv-header-right">
-            ${s.initiated_by ? '<span class="conv-badge-link">&#x1F517;</span>' : ''}
+            ${s.initiated_by ? `<img class="conv-badge-thumb" src="${API}/agents/${escapeHtml(s.initiated_by)}/thumbnail" alt="">` : ''}
             <span class="conv-count">(${s.message_count})</span>
           </span>
         </div>
@@ -312,6 +314,7 @@ async function selectSession(sessionId) {
     }
   }
   applyModelSelectStyle(sel);
+  showSystemPromptPreview(currentAgentId);
   await loadSessionHistory(sessionId);
 }
 
@@ -437,42 +440,12 @@ function _appendMsgRange(parent, messages, from, to) {
           <div class="message-time">${time}</div>
         </div>`;
     } else {
-      const cmd = _parseCommandMessage(content);
-      if (cmd) {
-        div.innerHTML = `
-          <div class="message-bubble cmd-bubble">
-            <span class="cmd-name">${escapeHtml(cmd.name)}</span>${cmd.args ? ` <span class="cmd-args">${escapeHtml(cmd.args)}</span>` : ''}
-          </div>
-          <div class="message-time">${time}</div>`;
-      } else {
-        div.innerHTML = `
-          <div class="message-bubble">${escapeHtml(content)}</div>
-          <div class="message-time">${time}</div>`;
-      }
+      div.innerHTML = `
+        <div class="message-bubble">${escapeHtml(content)}</div>
+        <div class="message-time">${time}</div>`;
     }
     parent.appendChild(div);
   }
-}
-
-// スキル本文パターン: { 検出文字列 → コマンド名 }
-const _SKILL_PATTERNS = [
-  { pattern: '# ルール\n- *公開するファイルは src/ 及び assets/', name: '/deploy' },
-  { pattern: '# ルール\r\n- *公開するファイルは src/ 及び assets/', name: '/deploy' },
-];
-
-function _parseCommandMessage(content) {
-  // <command-name> タグあり（ユーザーが直接入力した場合）
-  const nameMatch = content.match(/<command-name>([^<]+)<\/command-name>/);
-  if (nameMatch) {
-    const argsMatch = content.match(/<command-args>([\s\S]*?)<\/command-args>/);
-    return { name: nameMatch[1].trim(), args: argsMatch ? argsMatch[1].trim() : '' };
-  }
-  // Skill ツール経由（タグなし）: 本文パターンで判定
-  const trimmed = content.trimStart();
-  for (const { pattern, name } of _SKILL_PATTERNS) {
-    if (trimmed.startsWith(pattern)) return { name, args: '' };
-  }
-  return null;
 }
 
 function updateAssistantTimestamps(container) {
@@ -978,7 +951,7 @@ async function showSystemPromptPreview(agentId) {
     data = await resp.json();
   } catch (_) { return; }
 
-  if (!data.content && !data.shared_instructions) return;
+  if (!data.content && !data.shared_instructions && !data.agent_communication) return;
 
   let sectionsHtml = '';
   if (data.content) {
@@ -991,6 +964,12 @@ async function showSystemPromptPreview(agentId) {
     sectionsHtml += `<div class="spp-section">
       <div class="spp-section-title">共通指示 (shared_instructions.md)</div>
       <pre class="spp-content">${escapeHtml(data.shared_instructions)}</pre>
+    </div>`;
+  }
+  if (data.agent_communication) {
+    sectionsHtml += `<div class="spp-section">
+      <div class="spp-section-title">エージェント間通信 (agent_communication.md) ※新規セッション時のみ</div>
+      <pre class="spp-content">${escapeHtml(data.agent_communication)}</pre>
     </div>`;
   }
 
