@@ -65,11 +65,20 @@ async def ask_agent(
 
     model = resolve_model(agent.cli, agent.model_tier)
 
+    # 発信者情報をメッセージに注入
+    caller_id = chain[0] if chain else "system"
+    try:
+        caller = config.get_agent(caller_id)
+        caller_name = caller.name
+    except AgentNotFoundError:
+        caller_name = caller_id
+    prompt = f"[{caller_name}からのメッセージ]\n{body.message}"
+
     # CLIBridge でストリームを内部消費し、テキストを蓄積
     try:
         stream = bridge.run_stream(
             project_path=agent.path,
-            prompt=body.message,
+            prompt=prompt,
             model=model,
             session_id=body.session_id,
         )

@@ -454,14 +454,25 @@ function _appendMsgRange(parent, messages, from, to) {
   }
 }
 
+// スキル本文パターン: { 検出文字列 → コマンド名 }
+const _SKILL_PATTERNS = [
+  { pattern: '# ルール\n- *公開するファイルは src/ 及び assets/', name: '/deploy' },
+  { pattern: '# ルール\r\n- *公開するファイルは src/ 及び assets/', name: '/deploy' },
+];
+
 function _parseCommandMessage(content) {
+  // <command-name> タグあり（ユーザーが直接入力した場合）
   const nameMatch = content.match(/<command-name>([^<]+)<\/command-name>/);
-  if (!nameMatch) return null;
-  const argsMatch = content.match(/<command-args>([\s\S]*?)<\/command-args>/);
-  return {
-    name: nameMatch[1].trim(),
-    args: argsMatch ? argsMatch[1].trim() : '',
-  };
+  if (nameMatch) {
+    const argsMatch = content.match(/<command-args>([\s\S]*?)<\/command-args>/);
+    return { name: nameMatch[1].trim(), args: argsMatch ? argsMatch[1].trim() : '' };
+  }
+  // Skill ツール経由（タグなし）: 本文パターンで判定
+  const trimmed = content.trimStart();
+  for (const { pattern, name } of _SKILL_PATTERNS) {
+    if (trimmed.startsWith(pattern)) return { name, args: '' };
+  }
+  return null;
 }
 
 function updateAssistantTimestamps(container) {
