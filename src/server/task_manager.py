@@ -112,7 +112,10 @@ class TaskManager:
 
     def _load_task(self, md_file: Path) -> Task | None:
         try:
-            content = md_file.read_text(encoding="utf-8")
+            try:
+                content = md_file.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                content = md_file.read_text(encoding="cp932")
         except OSError:
             return None
         frontmatter, body = _parse_frontmatter(content)

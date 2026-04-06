@@ -1782,7 +1782,12 @@ async function loadTasks() {
   if (!currentAgentId) return;
   try {
     const resp = await fetch(`${API}/agents/${currentAgentId}/tasks`);
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      tasksCache = {};
+      taskExecutionOrder = [];
+      renderTaskList();
+      return;
+    }
     const data = await resp.json();
     tasksCache = {};
     (data.tasks || []).forEach(t => { tasksCache[t.task_id] = t; });
@@ -1796,6 +1801,9 @@ async function loadTasks() {
     }
   } catch (e) {
     console.error('タスク読み込みエラー', e);
+    tasksCache = {};
+    taskExecutionOrder = [];
+    renderTaskList();
   }
 }
 
