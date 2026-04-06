@@ -686,7 +686,6 @@ async function sendMessage(opts = {}) {
 
   // 送信先セッションのコンテナを確実に表示（新規セッション含む）
   activateSessionContainer(sentSessionId);
-  hideSystemPromptPreview();
 
   // ユーザーメッセージを即座に表示
   appendMessage('user', message);
