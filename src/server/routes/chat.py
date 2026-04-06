@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from server.config import AgentNotFoundError, ConfigManager
-from server.session_reader import SessionReader
+from server.session_reader import AgentSessionReader
 from server.cli_bridge import CLIBridge, parse_stream_event, resolve_model
 from server.task_manager import TaskManager
 from server.task_context import build_task_context
@@ -46,13 +46,13 @@ class ChatRequest(BaseModel):
 def list_sessions(
     agent_id: str,
     config: ConfigManager = Depends(get_config_manager),
-    reader: SessionReader = Depends(get_session_reader),
+    reader: AgentSessionReader = Depends(get_session_reader),
 ):
     try:
         agent = config.get_agent(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    sessions = reader.list_sessions(agent.path)
+    sessions = reader.list_sessions(agent.path, cli=agent.cli)
     return [s.model_dump() if hasattr(s, 'model_dump') else s.dict() for s in sessions]
 
 
@@ -61,13 +61,13 @@ def get_session(
     agent_id: str,
     session_id: str,
     config: ConfigManager = Depends(get_config_manager),
-    reader: SessionReader = Depends(get_session_reader),
+    reader: AgentSessionReader = Depends(get_session_reader),
 ):
     try:
         agent = config.get_agent(agent_id)
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
-    messages = reader.read_session(agent.path, session_id)
+    messages = reader.read_session(agent.path, session_id, cli=agent.cli)
     return [m.model_dump() if hasattr(m, 'model_dump') else m.dict() for m in messages]
 
 
@@ -124,6 +124,7 @@ async def send_chat(
                 model=model,
                 session_id=body.session_id,
                 agent_id=agent_id,
+                cli=agent.cli,
             )
             async for raw_event in stream:
                 # _ping は接続維持のためのダミーイベント（15秒無応答時にrun_stream側で生成）
@@ -144,6 +145,9 @@ async def send_chat(
                         yield f"data: {json.dumps({'type': 'tool_use', 'data': desc}, ensure_ascii=False)}\n\n"
                 elif ev.event_type == "result":
                     got_result = True
+                    # cli 種別をメタに記録（CodexSessionReader がフィルタリングに使う）
+                    if ev.session_id:
+                        _update_session_meta(agent.path, ev.session_id, {"cli": agent.cli})
                     yield f"data: {json.dumps({'type': 'session_id', 'data': ev.session_id}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
         except Exception as e:
@@ -203,7 +207,7 @@ def get_process_status(
     watching: str | None = None,
     config: ConfigManager = Depends(get_config_manager),
     bridge: CLIBridge = Depends(get_cli_bridge),
-    reader: SessionReader = Depends(get_session_reader),
+    reader: AgentSessionReader = Depends(get_session_reader),
     startup_id: str = Depends(get_startup_id),
 ):
     """稼働中のセッションプロセス一覧 + 更新検知情報を返す"""
@@ -214,11 +218,11 @@ def get_process_status(
     result = {
         "startup_id": startup_id,
         "inferring": bridge.inferring_session_ids(agent.path),
-        "dir_mtime": reader.get_dir_mtime(agent.path),
+        "dir_mtime": reader.get_dir_mtime(agent.path, cli=agent.cli),
         "processes": bridge.process_debug_info(agent.path),
     }
     if watching:
-        result["watching_mtime"] = reader.get_session_mtime(agent.path, watching)
+        result["watching_mtime"] = reader.get_session_mtime(agent.path, watching, cli=agent.cli)
     return result
 
 

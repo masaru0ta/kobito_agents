@@ -69,11 +69,13 @@ class ConfigManager:
 
     _THUMBNAIL_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
-    def _read_system_prompt(self, path: str) -> str:
-        claude_md = Path(path) / "CLAUDE.md"
-        if claude_md.exists():
-            return claude_md.read_text(encoding="utf-8")
-        return ""
+    def _system_prompt_file(self, path: str, cli: str = "claude") -> Path:
+        filename = "AGENTS.md" if cli == "codex" else "CLAUDE.md"
+        return Path(path) / filename
+
+    def _read_system_prompt(self, path: str, cli: str = "claude") -> str:
+        f = self._system_prompt_file(path, cli)
+        return f.read_text(encoding="utf-8") if f.exists() else ""
 
     def get_thumbnail_path(self, agent_id: str) -> Path | None:
         thumb_dir = self._data_dir / "thumbnails"
@@ -108,7 +110,7 @@ class ConfigManager:
         return [
             AgentInfo(
                 **agent,
-                system_prompt=self._read_system_prompt(agent["path"]),
+                system_prompt=self._read_system_prompt(agent["path"], agent.get("cli", "claude")),
                 thumbnail_url=self.get_thumbnail_url(agent["id"]),
             )
             for agent in agents
@@ -119,7 +121,7 @@ class ConfigManager:
             if agent["id"] == agent_id:
                 return AgentInfo(
                     **agent,
-                    system_prompt=self._read_system_prompt(agent["path"]),
+                    system_prompt=self._read_system_prompt(agent["path"], agent.get("cli", "claude")),
                     thumbnail_url=self.get_thumbnail_url(agent_id),
                 )
         raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
@@ -135,7 +137,7 @@ class ConfigManager:
                 self._write_agents(agents)
                 return AgentInfo(
                     **agent,
-                    system_prompt=self._read_system_prompt(agent["path"]),
+                    system_prompt=self._read_system_prompt(agent["path"], agent.get("cli", "claude")),
                 )
         raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
 
@@ -178,7 +180,7 @@ class ConfigManager:
 
         return AgentInfo(
             **new_agent,
-            system_prompt=self._read_system_prompt(path),
+            system_prompt=self._read_system_prompt(path, cli),
         )
 
     def delete_agent(self, agent_id: str) -> None:
@@ -200,7 +202,7 @@ class ConfigManager:
 
     def update_system_prompt(self, agent_id: str, content: str) -> None:
         agent = self.get_agent(agent_id)
-        (Path(agent.path) / "CLAUDE.md").write_text(content, encoding="utf-8")
+        self._system_prompt_file(agent.path, agent.cli).write_text(content, encoding="utf-8")
 
     def get_setting(self, key: str, default=None):
         if not self._settings_file.exists():

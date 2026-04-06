@@ -38,6 +38,7 @@ class AgentCreateRequest(BaseModel):
 class AgentUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
+    cli: str | None = None
     model_tier: str | None = None
 
 

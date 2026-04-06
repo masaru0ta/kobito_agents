@@ -74,28 +74,178 @@ def _ensure_mcp_config(agent_id: str) -> Path:
     path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
-# モデルティアからモデル名へのマッピング
-MODEL_MAP = {
-    "claude": {
-        "deep": "opus",
-        "quick": "sonnet",
-    },
-    "codex": {
-        "deep": "o3",
-        "quick": "o4-mini",
-    },
+# ============================================================
+# CLIアダプター（CLI実装が変わる部分を集約）
+# ============================================================
+# 新しいCLIを追加する場合: CLIAdapter を継承したクラスを作り _ADAPTERS に登録するだけでよい
+
+class CLIAdapter:
+    """各CLIツールの実装差分を集約する基底クラス"""
+    _models: dict[str, str] = {}
+
+    def resolve_model(self, tier: str) -> str:
+        model = self._models.get(tier)
+        if model is None:
+            raise ValueError(f"不明なモデルティア: {tier}")
+        return model
+
+    async def run_stream(
+        self,
+        bridge: "CLIBridge",
+        project_path: str,
+        prompt: str,
+        model: str,
+        session_id: str | None,
+        extra_system_prompt_file: Path | None,
+        agent_id: str,
+    ) -> AsyncGenerator[dict, None]:
+        raise NotImplementedError
+        yield  # AsyncGenerator として認識させるためのマーカー
+
+
+class ClaudeAdapter(CLIAdapter):
+    _models = {"quick": "sonnet", "deep": "opus"}
+
+    @staticmethod
+    def find_binary() -> str:
+        path = shutil.which("claude")
+        if path is None:
+            raise FileNotFoundError("claudeコマンドが見つかりません")
+        return path
+
+    def build_command(
+        self,
+        model: str,
+        session_id: str | None = None,
+        extra_system_prompt_file: Path | None = None,
+        agent_id: str = "",
+    ) -> list[str]:
+        """Claude Code CLI のコマンドを構築する"""
+        mcp_config = _ensure_mcp_config(agent_id)
+        cmd = [
+            self.find_binary(),
+            "-p", "",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--model", model,
+            "--mcp-config", str(mcp_config),
+        ]
+        if session_id:
+            cmd.extend(["--resume", session_id])
+        else:
+            if _SHARED_INSTRUCTIONS_FILE.exists():
+                cmd.extend(["--append-system-prompt-file", str(_SHARED_INSTRUCTIONS_FILE)])
+            if extra_system_prompt_file and extra_system_prompt_file.exists():
+                cmd.extend(["--append-system-prompt-file", str(extra_system_prompt_file)])
+        return cmd
+
+    async def run_stream(self, bridge, project_path, prompt, model, session_id, extra_system_prompt_file, agent_id):
+        async for event in bridge._run_claude_stream(
+            project_path, prompt, model, session_id, extra_system_prompt_file, agent_id
+        ):
+            yield event
+
+
+class CodexAdapter(CLIAdapter):
+    # ChatGPT アカウントでは gpt-5 のみ対応（OpenAI API キーなら o4-mini/o3 に変更可）
+    _models = {"quick": "gpt-5", "deep": "gpt-5"}
+
+    async def run_stream(self, bridge, project_path, prompt, model, session_id, extra_system_prompt_file, agent_id):
+        """Codex CLI を実行する。session_id があればスレッドを再開する。
+
+        出力フォーマット（codex exec --json）:
+          {"type":"thread.started","thread_id":"<uuid7>"}
+          {"type":"turn.started"}
+          {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+          {"type":"turn.completed","usage":{...}}
+        """
+        codex = shutil.which("codex")
+        if codex is None:
+            raise FileNotFoundError("codexコマンドが見つかりません")
+
+        # codex exec [--full-auto] [-m model] [--json] [resume <session_id>] <prompt>
+        # 新規セッションのみ共通指示 + extra_system_prompt_file をプロンプト先頭に注入
+        if not session_id:
+            headers = []
+            if _SHARED_INSTRUCTIONS_FILE.exists():
+                headers.append(_SHARED_INSTRUCTIONS_FILE.read_text(encoding="utf-8").strip())
+            if extra_system_prompt_file and extra_system_prompt_file.exists():
+                headers.append(extra_system_prompt_file.read_text(encoding="utf-8").strip())
+            if headers:
+                prompt = "\n\n---\n\n".join(headers) + "\n\n---\n\n" + prompt
+
+        cmd = [codex, "exec", "--dangerously-bypass-approvals-and-sandbox", "-m", model, "--json"]
+        if session_id:
+            cmd.extend(["resume", session_id])
+        cmd.append(prompt)
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=project_path,
+        )
+        assert proc.stdout is not None
+
+        thread_id = ""
+        got_turn_completed = False
+        error_msg = ""
+        async for raw in proc.stdout:
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                print(f"[CODEX] non-JSON stdout: {line[:200]}", flush=True)
+                continue
+
+            etype = event.get("type", "")
+            if etype == "thread.started":
+                thread_id = event.get("thread_id", "")
+            elif etype == "item.completed":
+                item = event.get("item", {})
+                if item.get("type") == "agent_message" and item.get("text"):
+                    yield {
+                        "type": "assistant",
+                        "message": {"content": [{"type": "text", "text": item["text"]}]},
+                    }
+            elif etype == "turn.completed":
+                got_turn_completed = True
+                yield {"type": "result", "session_id": thread_id, "result": ""}
+            elif etype in ("error", "turn.failed"):
+                raw_msg = event.get("message") or event.get("error", {}).get("message", "")
+                # メッセージが JSON 文字列の場合はパースして取り出す
+                try:
+                    inner = json.loads(raw_msg)
+                    error_msg = inner.get("error", {}).get("message", raw_msg)
+                except (json.JSONDecodeError, TypeError):
+                    error_msg = raw_msg
+
+        await proc.wait()
+
+        if not got_turn_completed:
+            if not error_msg:
+                stderr_bytes = await proc.stderr.read()
+                error_msg = stderr_bytes.decode("utf-8", errors="replace").strip() or "(出力なし)"
+            print(f"[CODEX] 異常終了 returncode={proc.returncode} error={error_msg[:300]}", flush=True)
+            raise RuntimeError(f"codex エラー: {error_msg[:300]}")
+
+
+_ADAPTERS: dict[str, CLIAdapter] = {
+    "claude": ClaudeAdapter(),
+    "codex":  CodexAdapter(),
 }
 
 
 def resolve_model(cli: str, model_tier: str) -> str:
     """CLIツール種別とモデルティアからモデル名を返す"""
-    cli_map = MODEL_MAP.get(cli)
-    if cli_map is None:
+    adapter = _ADAPTERS.get(cli)
+    if adapter is None:
         raise ValueError(f"不明なCLIツール: {cli}")
-    model = cli_map.get(model_tier)
-    if model is None:
-        raise ValueError(f"不明なモデルティア: {model_tier}")
-    return model
+    return adapter.resolve_model(model_tier)
 
 
 @dataclass
@@ -336,43 +486,6 @@ class CLIBridge:
         self._cleanup_task: asyncio.Task | None = None
         atexit.register(self._kill_all_sync)
 
-    @staticmethod
-    def _find_claude() -> str:
-        path = shutil.which("claude")
-        if path is None:
-            raise FileNotFoundError("claudeコマンドが見つかりません")
-        return path
-
-    def _build_command(
-        self,
-        model: str,
-        session_id: str | None = None,
-        extra_system_prompt_file: Path | None = None,
-        agent_id: str = "",
-    ) -> list[str]:
-        """CLIコマンドを構築する。
-        CLAUDE.md は Claude Code が cwd から自動検出するため --system-prompt は使わない。
-        共通指示のみ --append-system-prompt-file で追加注入する。
-        """
-        mcp_config = _ensure_mcp_config(agent_id)
-        cmd = [
-            self._find_claude(),
-            "-p", "",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--model", model,
-            "--mcp-config", str(mcp_config),
-        ]
-        if session_id:
-            cmd.extend(["--resume", session_id])
-        else:
-            if _SHARED_INSTRUCTIONS_FILE.exists():
-                cmd.extend(["--append-system-prompt-file", str(_SHARED_INSTRUCTIONS_FILE)])
-            if extra_system_prompt_file and extra_system_prompt_file.exists():
-                cmd.extend(["--append-system-prompt-file", str(extra_system_prompt_file)])
-        return cmd
-
     def _spawn_process(self, project_path: str, cmd: list[str]) -> subprocess.Popen:
         return subprocess.Popen(
             cmd,
@@ -417,7 +530,9 @@ class CLIBridge:
                 return mp, key
 
             # 新規作成
-            cmd = self._build_command(model, session_id, extra_system_prompt_file, agent_id)
+            claude = _ADAPTERS["claude"]
+            assert isinstance(claude, ClaudeAdapter)
+            cmd = claude.build_command(model, session_id, extra_system_prompt_file, agent_id)
             proc = self._spawn_process(project_path, cmd)
             mp = ManagedProcess(proc=proc, model=model, session_id=session_id or "", project_path=project_path)
             loop = asyncio.get_running_loop()
@@ -441,8 +556,27 @@ class CLIBridge:
         session_id: str | None = None,
         extra_system_prompt_file: Path | None = None,
         agent_id: str = "",
+        cli: str = "claude",
     ) -> AsyncGenerator[dict, None]:
         """メッセージを送信し、resultイベントまでのストリームをyieldする"""
+        adapter = _ADAPTERS.get(cli)
+        if adapter is None:
+            raise ValueError(f"不明なCLIツール: {cli}")
+        async for event in adapter.run_stream(
+            self, project_path, prompt, model, session_id, extra_system_prompt_file, agent_id
+        ):
+            yield event
+
+    async def _run_claude_stream(
+        self,
+        project_path: str,
+        prompt: str,
+        model: str,
+        session_id: str | None = None,
+        extra_system_prompt_file: Path | None = None,
+        agent_id: str = "",
+    ) -> AsyncGenerator[dict, None]:
+        """Claude Code 常駐プロセスへメッセージを送信し、resultイベントまでをyieldする"""
         mp, key = await self._get_or_create_process(
             project_path, model, session_id, extra_system_prompt_file, agent_id,
         )
@@ -703,8 +837,10 @@ class CLIBridge:
         return False
 
     def launch_cli(self, project_path: str, session_id: str | None = None) -> None:
-        """ターミナルでCLIを起動する（Windowsのみ）"""
-        cmd_parts = ["claude"]
+        """ターミナルでCLIを起動する（Windowsのみ・Claude専用）"""
+        claude = _ADAPTERS["claude"]
+        assert isinstance(claude, ClaudeAdapter)
+        cmd_parts = [claude.find_binary()]
         if session_id:
             cmd_parts.extend(["--resume", session_id])
         cmd_str = " ".join(cmd_parts)

@@ -106,6 +106,13 @@
         <input type="text" class="settings-input" data-field="description">
       </div>
       <div class="settings-section">
+        <label>CLI</label>
+        <select class="settings-input" data-field="cli">
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+        </select>
+      </div>
+      <div class="settings-section">
         <label>モデル</label>
         <select class="settings-input" data-field="model_tier">
           <option value="quick">sonnet（標準）</option>
@@ -226,7 +233,7 @@
     </div>
     <div class="settings-pane-body">
       <div class="settings-field">
-        <label>CLAUDE.md</label>
+        <label id="system-prompt-label">CLAUDE.md</label>
         <textarea data-field="system-prompt"></textarea>
       </div>
     </div>

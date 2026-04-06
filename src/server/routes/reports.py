@@ -11,12 +11,12 @@ from server.routes.deps import get_config_manager
 router = APIRouter(prefix="/api/agents/{agent_id}/reports", tags=["reports"])
 
 # 表示除外ディレクトリ（隠しディレクトリ + ノイズになりやすいもの）
-_EXCLUDE_DIRS = {".git", ".claude", ".kobito", ".pytest_cache", ".playwright-mcp",
+_EXCLUDE_DIRS = {".git", ".pytest_cache", ".playwright-mcp",
                  "node_modules", "__pycache__", ".venv", "venv"}
 
 
 def _is_excluded(name: str) -> bool:
-    return name in _EXCLUDE_DIRS or name.startswith(".")
+    return name in _EXCLUDE_DIRS
 
 
 @router.get("")

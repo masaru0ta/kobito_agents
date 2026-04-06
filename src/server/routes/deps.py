@@ -3,7 +3,7 @@
 from fastapi import Request
 
 from server.config import ConfigManager
-from server.session_reader import SessionReader
+from server.session_reader import AgentSessionReader
 from server.cli_bridge import CLIBridge
 
 
@@ -11,7 +11,7 @@ def get_config_manager(request: Request) -> ConfigManager:
     return request.app.state.config_manager
 
 
-def get_session_reader(request: Request) -> SessionReader:
+def get_session_reader(request: Request) -> AgentSessionReader:
     return request.app.state.session_reader
 
 

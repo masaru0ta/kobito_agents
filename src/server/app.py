@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from server.config import ConfigManager
-from server.session_reader import SessionReader, ClaudeSessionReader
+from server.session_reader import SessionReader, AgentSessionReader
 from server.cli_bridge import CLIBridge, cleanup_orphaned_processes
 from server.routes.agents import router as agents_router
 from server.routes.chat import router as chat_router
@@ -42,7 +42,7 @@ def create_app(
         config_manager = ConfigManager(data_dir=data_dir, system_path=str(project_root))
 
     if session_reader is None:
-        session_reader = ClaudeSessionReader()
+        session_reader = AgentSessionReader()
 
     if cli_bridge is None:
         cli_bridge = CLIBridge()

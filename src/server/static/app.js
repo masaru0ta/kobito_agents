@@ -463,7 +463,7 @@ function updateAssistantTimestamps(container) {
 
 const MODEL_LABELS = {
   claude: { deep: 'opus', quick: 'sonnet' },
-  codex:  { deep: 'o3',   quick: 'o4-mini' },
+  codex:  { deep: 'gpt-5', quick: 'gpt-5' },
 };
 
 function updateModelSelect(agent) {
@@ -803,6 +803,8 @@ async function sendMessage(opts = {}) {
       if (streamError.includes('再起動')) {
         console.warn('[STREAM] 再起動検知(SSEエラー) sid:', sentSessionId, 'error:', streamError);
         showToast('サーバーが再起動されました。応答を受信待ちです...');
+      } else {
+        showToast(streamError);
       }
       stopBtn.style.display = 'none';
       sendBtn.style.display = '';
@@ -953,10 +955,13 @@ async function showSystemPromptPreview(agentId) {
 
   if (!data.content && !data.shared_instructions) return;
 
+  const agent = agents.find(a => a.id === agentId);
+  const mdFileName = (agent?.cli === 'codex') ? 'AGENTS.md' : 'CLAUDE.md';
+
   let sectionsHtml = '';
   if (data.content) {
     sectionsHtml += `<div class="spp-section">
-      <div class="spp-section-title">CLAUDE.md</div>
+      <div class="spp-section-title">${mdFileName}</div>
       <pre class="spp-content">${escapeHtml(data.content)}</pre>
     </div>`;
   }
@@ -1381,6 +1386,24 @@ function initReports() {
 // 設定
 // ============================================================
 
+const MODEL_OPTIONS = {
+  claude: [
+    { value: 'quick', label: 'sonnet（標準）' },
+    { value: 'deep',  label: 'opus（高精度）' },
+  ],
+  codex: [
+    { value: 'quick', label: 'gpt-5' },
+    { value: 'deep',  label: 'gpt-5' },
+  ],
+};
+
+function fillModelOptions(cliValue, selectEl, currentTier) {
+  const opts = MODEL_OPTIONS[cliValue] || MODEL_OPTIONS.claude;
+  selectEl.innerHTML = opts.map(o =>
+    `<option value="${o.value}"${o.value === currentTier ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+}
+
 async function loadSettingsData() {
   if (!currentAgentId) return;
 
@@ -1389,9 +1412,15 @@ async function loadSettingsData() {
 
   document.querySelector('[data-field="name"]').value = agent.name || '';
   document.querySelector('[data-field="description"]').value = agent.description || '';
-  document.querySelector('[data-field="model_tier"]').value = agent.model_tier || 'quick';
+  document.querySelector('[data-field="cli"]').value = agent.cli || 'claude';
+  const modelSel = document.querySelector('[data-field="model_tier"]');
+  fillModelOptions(agent.cli || 'claude', modelSel, agent.model_tier || 'quick');
   document.querySelector('[data-field="path"]').value = agent.path || '';
-  document.getElementById('settings-pane-header').textContent = `${agent.name} — AI設定 (CLAUDE.md)`;
+  const mdFileName = agent.cli === 'codex' ? 'AGENTS.md' : 'CLAUDE.md';
+  document.getElementById('settings-pane-header').textContent = `${agent.name} — AI設定 (${mdFileName})`;
+  document.getElementById('open-claude-md-btn').textContent = `AI設定 (${mdFileName}) を編集`;
+  const spLabel = document.getElementById('system-prompt-label');
+  if (spLabel) spLabel.textContent = mdFileName;
 
   const promptResp = await fetch(`${API}/agents/${currentAgentId}/system-prompt`);
   const promptData = await promptResp.json();
@@ -1444,7 +1473,7 @@ async function loadSchedulerLogs() {
       <div class="slog-header">
         ${agentAvatarHtml}
         <span class="slog-time">${dateStr}</span>
-        <a class="slog-link slog-title" data-task-id="${log.task_id}">${escapeHtml(log.task_title || log.task_id)}</a>
+        <a class="slog-link slog-title" data-task-id="${log.task_id}" data-agent-id="${log.agent_id}">${escapeHtml(log.task_title || log.task_id)}</a>
         <span class="slog-progress">${progress}</span>
       </div>
       <div class="slog-steps">${stepsHtml}</div>
@@ -1458,6 +1487,8 @@ async function loadSchedulerLogs() {
     const taskLink = e.target.closest('[data-task-id]');
     if (taskLink) {
       closeSchedulerLog();
+      const agentId = taskLink.dataset.agentId;
+      if (agentId && agentId !== currentAgentId) await selectAgent(agentId);
       switchTab('tasks');
       if (!tasksCache[taskLink.dataset.taskId]) await loadTasks();
       selectTask(taskLink.dataset.taskId);
@@ -1512,6 +1543,12 @@ function initActions() {
     document.querySelector('.layout').classList.add('mobile-chat-active');
   });
 
+  // CLI 変更時にモデル選択肢を切り替える
+  document.querySelector('[data-field="cli"]').addEventListener('change', (e) => {
+    const modelSel = document.querySelector('[data-field="model_tier"]');
+    fillModelOptions(e.target.value, modelSel, modelSel.value);
+  });
+
   // 設定保存（中央ペイン）
   document.getElementById('settings-save-btn').addEventListener('click', async () => {
     await fetch(`${API}/agents/${currentAgentId}`, {
@@ -1520,6 +1557,7 @@ function initActions() {
       body: JSON.stringify({
         name: document.querySelector('[data-field="name"]').value,
         description: document.querySelector('[data-field="description"]').value,
+        cli: document.querySelector('[data-field="cli"]').value,
         model_tier: document.querySelector('[data-field="model_tier"]').value,
       }),
     });
@@ -2252,13 +2290,20 @@ function initAddAgent() {
   const cancelBtn2 = document.getElementById('add-agent-cancel-btn2');
   const submitBtn = document.getElementById('add-agent-submit-btn');
 
+  const cliSel = document.getElementById('add-agent-cli');
+  const modelSel = document.getElementById('add-agent-model-tier');
+
+  cliSel.addEventListener('change', () => {
+    fillModelOptions(cliSel.value, modelSel, modelSel.value);
+  });
+
   function openForm() {
     // フォームをリセット
     document.getElementById('add-agent-name').value = '';
     document.getElementById('add-agent-path').value = '';
     document.getElementById('add-agent-description').value = '';
-    document.getElementById('add-agent-cli').value = 'claude';
-    document.getElementById('add-agent-model-tier').value = 'quick';
+    cliSel.value = 'claude';
+    fillModelOptions('claude', modelSel, 'quick');
     pane.style.display = 'flex';
   }
 
