@@ -13,6 +13,7 @@ from server.cli_bridge import CLIBridge, parse_stream_event, resolve_model
 from server.config import ConfigManager
 from server.task_context import build_task_context
 from server.task_manager import TaskManager
+from server.routes.chat import _update_session_meta
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,7 @@ class Scheduler:
                 if ev.event_type == "result":
                     if ev.session_id:
                         log_entry["session_id"] = ev.session_id
+                        _update_session_meta(agent_path, ev.session_id, {"cli": agent.cli})
                         if ev.session_id not in (task.sessions or []):
                             tm.add_session(task_id, ev.session_id)
                             logger.info(

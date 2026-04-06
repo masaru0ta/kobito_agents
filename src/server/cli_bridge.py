@@ -178,7 +178,13 @@ class CodexAdapter(CLIAdapter):
                 cmd.extend(["-c", f"developer_instructions={json.dumps(chr(10).join(parts), ensure_ascii=False)}"])
 
         if session_id:
-            cmd.extend(["resume", session_id])
+            # resume にはロールアウトID（rollout-{date}-{uuid}）が必要
+            # ファイルが存在する場合のみ resume する（存在しなければ新規セッション）
+            codex_home = Path.home() / ".codex"
+            sessions_dir = codex_home / "sessions"
+            matches = list(sessions_dir.glob(f"**/*{session_id}*.jsonl")) if sessions_dir.exists() else []
+            if matches:
+                cmd.extend(["resume", matches[0].stem])
         cmd.append(prompt)
 
         proc = await asyncio.create_subprocess_exec(
