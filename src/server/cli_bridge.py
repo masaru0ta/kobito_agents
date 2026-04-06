@@ -165,17 +165,18 @@ class CodexAdapter(CLIAdapter):
             raise FileNotFoundError("codexコマンドが見つかりません")
 
         # codex exec [--full-auto] [-m model] [--json] [resume <session_id>] <prompt>
-        # 新規セッションのみ共通指示 + extra_system_prompt_file をプロンプト先頭に注入
-        if not session_id:
-            headers = []
-            if _SHARED_INSTRUCTIONS_FILE.exists():
-                headers.append(_SHARED_INSTRUCTIONS_FILE.read_text(encoding="utf-8").strip())
-            if extra_system_prompt_file and extra_system_prompt_file.exists():
-                headers.append(extra_system_prompt_file.read_text(encoding="utf-8").strip())
-            if headers:
-                prompt = "\n\n---\n\n".join(headers) + "\n\n---\n\n" + prompt
-
         cmd = [codex, "exec", "--dangerously-bypass-approvals-and-sandbox", "-m", model, "--json"]
+
+        # 新規セッションのみ共通指示 + extra_system_prompt_file を -c instructions=... で注入
+        if not session_id:
+            parts = []
+            if _SHARED_INSTRUCTIONS_FILE.exists():
+                parts.append(_SHARED_INSTRUCTIONS_FILE.read_text(encoding="utf-8").strip())
+            if extra_system_prompt_file and extra_system_prompt_file.exists():
+                parts.append(extra_system_prompt_file.read_text(encoding="utf-8").strip())
+            if parts:
+                cmd.extend(["-c", f"developer_instructions={json.dumps(chr(10).join(parts), ensure_ascii=False)}"])
+
         if session_id:
             cmd.extend(["resume", session_id])
         cmd.append(prompt)

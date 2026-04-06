@@ -76,14 +76,13 @@ async def ask_agent(
     except AgentNotFoundError:
         caller_name = caller_id
 
-    # Codex (GPT-5) はプレフィックスで「メッセージ処理タスク」と誤解するため付けない
     if agent.cli == "codex":
-        prompt = body.message
+        prompt = f"{caller_name}より: {body.message}"
     else:
         prompt = f"（あなた宛のメッセージ — 送信者: {caller_name}というAIエージェント）\n{body.message}"
 
-    # 新規セッションのみ agent_communication.md をシステムプロンプトとして注入（Claude のみ有効）
-    extra_prompt_file = _AGENT_COMMUNICATION_FILE if (not body.session_id and agent.cli == "claude") else None
+    # 新規セッションのみ agent_communication.md をシステムプロンプトとして注入
+    extra_prompt_file = _AGENT_COMMUNICATION_FILE if not body.session_id else None
 
     # CLIBridge でストリームを内部消費し、テキストを蓄積
     try:
