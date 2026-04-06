@@ -282,7 +282,6 @@ function renderSessions(sessions) {
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
   lastWatchingMtime = 0; // セッション切替時にリセット
-  hideSystemPromptPreview();
   // キャッシュされたコンテナを即時表示（切替を高速化）
   activateSessionContainer(sessionId);
   // モバイル: チャット画面に切り替え
