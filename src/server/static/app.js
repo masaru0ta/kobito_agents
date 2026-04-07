@@ -56,11 +56,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 // エージェント一覧
 // ============================================================
 
-async function loadAgents() {
+async function loadAgents({ autoSelect = true } = {}) {
   const resp = await fetch(`${API}/agents`);
   agents = await resp.json();
   renderAgents();
-  if (agents.length > 0) {
+  if (autoSelect && agents.length > 0) {
     selectAgent(agents[0].id);
   }
 }
@@ -1666,7 +1666,7 @@ function initActions() {
         model_tier: document.querySelector('[data-field="model_tier"]').value,
       }),
     });
-    await loadAgents();
+    await loadAgents({ autoSelect: false });
   });
 
   // サムネイルアップロード
@@ -1684,13 +1684,13 @@ function initActions() {
       showToast(err.detail || 'アップロードに失敗しました');
       return;
     }
-    await loadAgents();
+    await loadAgents({ autoSelect: false });
     loadSettingsData();
   });
   document.getElementById('thumbnail-remove-btn').addEventListener('click', async () => {
     if (!currentAgentId) return;
     await fetch(`${API}/agents/${currentAgentId}/thumbnail`, { method: 'DELETE' });
-    await loadAgents();
+    await loadAgents({ autoSelect: false });
     loadSettingsData();
   });
 
@@ -2534,8 +2534,8 @@ function initAddAgent() {
       }
       const newAgent = await resp.json();
       closeForm();
-      await loadAgents();
-      selectAgent(newAgent.id);
+      await loadAgents({ autoSelect: false });
+      await selectAgent(newAgent.id);
     } catch (e) {
       showToast('通信エラーが発生しました');
     }
