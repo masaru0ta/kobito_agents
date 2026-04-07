@@ -95,7 +95,13 @@ async function selectAgent(agentId) {
   loadSettingsData();
   // エージェントのCLI種別に合わせてモデル選択肢を更新
   const agent = agents.find(a => a.id === agentId);
-  if (agent) updateModelSelect(agent);
+  const modelSel = document.getElementById('model-select');
+  if (agent?.type === 'team') {
+    modelSel.style.display = 'none';
+  } else {
+    modelSel.style.display = '';
+    if (agent) updateModelSelect(agent);
+  }
   // プロセスステータスのポーリングを開始
   startProcessStatusPolling();
   // タスク詳細を閉じてタスク一覧を読み込む
@@ -236,7 +242,11 @@ function startProcessStatusPolling() {
 
 async function loadSessions() {
   if (!currentAgentId) return;
-  const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
+  const agent = agents.find(a => a.id === currentAgentId);
+  const url = agent?.type === 'team'
+    ? `${API}/teams/${currentAgentId}/sessions`
+    : `${API}/agents/${currentAgentId}/sessions`;
+  const resp = await fetch(url);
   sessions = await resp.json();
   renderSessions(sessions);
 }
@@ -297,23 +307,29 @@ async function selectSession(sessionId) {
   // セッションごとのモデル選択を復元（メモリ→メタデータ→エージェントデフォルトの優先順）
   const agent = agents.find(a => a.id === currentAgentId);
   const sel = document.getElementById('model-select');
-  const inMemory = sessionModelTiers[sessionId];
-  if (inMemory) {
-    sel.value = inMemory;
+  if (agent?.type === 'team') {
+    // チームエージェントはモデル選択非表示
+    sel.style.display = 'none';
   } else {
-    // セッション一覧からメタデータのmodel_tierを取得
-    const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
-    const sessions = await resp.json();
-    const session = sessions.find(s => s.session_id === sessionId);
-    const metaTier = session?.model_tier;
-    if (metaTier) {
-      sel.value = metaTier;
-      sessionModelTiers[sessionId] = metaTier;
-    } else if (agent) {
-      sel.value = agent.model_tier || 'quick';
+    sel.style.display = '';
+    const inMemory = sessionModelTiers[sessionId];
+    if (inMemory) {
+      sel.value = inMemory;
+    } else {
+      // セッション一覧からメタデータのmodel_tierを取得
+      const resp = await fetch(`${API}/agents/${currentAgentId}/sessions`);
+      const sessions = await resp.json();
+      const session = sessions.find(s => s.session_id === sessionId);
+      const metaTier = session?.model_tier;
+      if (metaTier) {
+        sel.value = metaTier;
+        sessionModelTiers[sessionId] = metaTier;
+      } else if (agent) {
+        sel.value = agent.model_tier || 'quick';
+      }
     }
+    applyModelSelectStyle(sel);
   }
-  applyModelSelectStyle(sel);
   showSystemPromptPreview(currentAgentId);
   await loadSessionHistory(sessionId);
 }
@@ -339,41 +355,48 @@ async function loadSessionHistory(sessionId, force = false) {
     return;
   }
 
-  const resp = await fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}`);
+  const agentForHistory = agents.find(a => a.id === currentAgentId);
+  const isTeam = agentForHistory?.type === 'team';
+  const histUrl = isTeam
+    ? `${API}/teams/${currentAgentId}/sessions/${sessionId}`
+    : `${API}/agents/${currentAgentId}/sessions/${sessionId}`;
+  const resp = await fetch(histUrl);
   const messages = await resp.json();
-  renderMessages(messages, sessionId);
+  renderMessages(messages, sessionId, isTeam);
 
   const date = messages.length > 0
     ? formatDate(messages[0].timestamp)
     : '';
   document.getElementById('chat-title').textContent = currentSessionTitle || (date ? `${date} の会話` : '');
 
-  // ファイル・タスクリンク表示
+  // ファイル・タスクリンク表示（チームセッションは非対応）
   const linkedFileEl = document.getElementById('chat-linked-file');
   linkedFileEl.style.display = 'none';
-  fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}/meta`)
-    .then(r => r.json())
-    .then(meta => {
-      if (meta.linked_task) {
-        const title = meta.linked_task_title || meta.linked_task;
-        linkedFileEl.innerHTML = `📋 ${escapeHtml(title)}`;
-        linkedFileEl.dataset.linkPath = meta.linked_task;
-        linkedFileEl.dataset.linkType = 'task';
-        linkedFileEl.style.display = 'block';
-      } else if (meta.linked_file) {
-        const fname = meta.linked_file.split('/').pop();
-        linkedFileEl.innerHTML = `📎 ${escapeHtml(fname)}`;
-        linkedFileEl.dataset.linkPath = meta.linked_file;
-        linkedFileEl.dataset.linkType = 'file';
-        linkedFileEl.style.display = 'block';
-      }
-    })
-    .catch(() => {});
+  if (!isTeam) {
+    fetch(`${API}/agents/${currentAgentId}/sessions/${sessionId}/meta`)
+      .then(r => r.json())
+      .then(meta => {
+        if (meta.linked_task) {
+          const title = meta.linked_task_title || meta.linked_task;
+          linkedFileEl.innerHTML = `📋 ${escapeHtml(title)}`;
+          linkedFileEl.dataset.linkPath = meta.linked_task;
+          linkedFileEl.dataset.linkType = 'task';
+          linkedFileEl.style.display = 'block';
+        } else if (meta.linked_file) {
+          const fname = meta.linked_file.split('/').pop();
+          linkedFileEl.innerHTML = `📎 ${escapeHtml(fname)}`;
+          linkedFileEl.dataset.linkPath = meta.linked_file;
+          linkedFileEl.dataset.linkType = 'file';
+          linkedFileEl.style.display = 'block';
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 const MSG_PAGE = 100;
 
-function renderMessages(messages, sessionId) {
+function renderMessages(messages, sessionId, isTeam = false) {
   const key = sessionId || currentSessionId;
   const container = getSessionContainer(key);
   container.querySelectorAll('.thinking-indicator').forEach(el => el._stopTimer?.());
@@ -381,10 +404,11 @@ function renderMessages(messages, sessionId) {
   if (sessionDomCache[key]) {
     sessionDomCache[key].stale = false;
     sessionDomCache[key].allMessages = messages;
+    sessionDomCache[key].isTeam = isTeam;
   }
   const from = Math.max(0, messages.length - MSG_PAGE);
   if (from > 0) container.appendChild(_makeLoadMoreBtn(key, from, container));
-  _appendMsgRange(container, messages, from, messages.length);
+  _appendMsgRange(container, messages, from, messages.length, isTeam);
   updateAssistantTimestamps(container);
   container.scrollTop = container.scrollHeight;
 }
@@ -396,18 +420,19 @@ function _makeLoadMoreBtn(key, upTo, container) {
   btn.onclick = () => {
     const msgs = sessionDomCache[key]?.allMessages;
     if (!msgs) return;
+    const isTeam = sessionDomCache[key]?.isTeam || false;
     const newFrom = Math.max(0, upTo - MSG_PAGE);
     btn.remove();
     const frag = document.createDocumentFragment();
     if (newFrom > 0) frag.appendChild(_makeLoadMoreBtn(key, newFrom, container));
-    _appendMsgRange(frag, msgs, newFrom, upTo);
+    _appendMsgRange(frag, msgs, newFrom, upTo, isTeam);
     container.insertBefore(frag, container.firstChild);
     updateAssistantTimestamps(container);
   };
   return btn;
 }
 
-function _appendMsgRange(parent, messages, from, to) {
+function _appendMsgRange(parent, messages, from, to, isTeam = false) {
   const agent = agents.find(a => a.id === currentAgentId);
   const avatarHtml = agent?.thumbnail_url
     ? `<img src="${agent.thumbnail_url}" class="msg-avatar" alt="">`
@@ -427,6 +452,22 @@ function _appendMsgRange(parent, messages, from, to) {
       });
     }
     if (!content) continue;
+
+    // チームセッションのエージェント発言
+    if (isTeam && m.role === 'agent') {
+      const agentName = m.agent_name || m.agent_id || 'エージェント';
+      const bubbleContent = typeof marked !== 'undefined' ? marked.parse(content) : escapeHtml(content);
+      const div = document.createElement('div');
+      div.className = 'message assistant';
+      div.innerHTML = `
+        <div class="msg-avatar-col"><div class="msg-avatar-letter">${escapeHtml(agentName.charAt(0))}</div></div>
+        <div class="msg-body">
+          <div class="team-agent-name">${escapeHtml(agentName)}</div>
+          <div class="message-bubble">${bubbleContent}</div>
+        </div>`;
+      parent.appendChild(div);
+      continue;
+    }
 
     const div = document.createElement('div');
     div.className = `message ${m.role}`;
@@ -492,7 +533,11 @@ function clearChat() {
 
 async function saveSessionTitle(title) {
   if (!currentAgentId || !currentSessionId) return;
-  await fetch(`${API}/agents/${currentAgentId}/sessions/${currentSessionId}/title`, {
+  const agent = agents.find(a => a.id === currentAgentId);
+  const titleUrl = agent?.type === 'team'
+    ? `${API}/teams/${currentAgentId}/sessions/${currentSessionId}/title`
+    : `${API}/agents/${currentAgentId}/sessions/${currentSessionId}/title`;
+  await fetch(titleUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title }),
@@ -693,17 +738,38 @@ async function sendMessage(opts = {}) {
   const abort = new AbortController();
   currentStreamAbort = abort;
 
+  const currentAgentObj = agents.find(a => a.id === sentAgentId);
+  const isTeamAgent = currentAgentObj?.type === 'team';
+
   try {
-    const modelTier = document.getElementById('model-select').value;
-    const body = { message, session_id: sentSessionId, model_tier: modelTier };
-    if (opts.task_id) body.task_id = opts.task_id;
-    if (opts.task_mode) body.task_mode = opts.task_mode;
-    const resp = await fetch(`${API}/agents/${sentAgentId}/chat`, {
+    let chatUrl, body;
+    if (isTeamAgent) {
+      chatUrl = `${API}/teams/${sentAgentId}/chat`;
+      body = { message, session_id: sentSessionId };
+    } else {
+      const modelTier = document.getElementById('model-select').value;
+      chatUrl = `${API}/agents/${sentAgentId}/chat`;
+      body = { message, session_id: sentSessionId, model_tier: modelTier };
+      if (opts.task_id) body.task_id = opts.task_id;
+      if (opts.task_mode) body.task_mode = opts.task_mode;
+    }
+    const resp = await fetch(chatUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: abort.signal,
     });
+
+    // HTTPエラー（4xx/5xx）はSSEではなくJSONで返る
+    if (!resp.ok) {
+      let detail = `エラー (${resp.status})`;
+      try {
+        const err = await resp.json();
+        if (err.detail) detail = err.detail;
+      } catch (_) {}
+      streamError = detail;
+      throw new Error(detail);
+    }
 
     // SSEストリーミング
     const reader = resp.body.getReader();
@@ -717,6 +783,8 @@ async function sendMessage(opts = {}) {
 
     // バブルは最初のチャンクが来た時点で作成する（それまで考え中表示を維持）
     let bubbleEl = null;
+    // チームの場合: 現在発言中のエージェント名を追跡
+    let currentTeamAgentName = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -731,12 +799,45 @@ async function sendMessage(opts = {}) {
             if (event.type === 'chunk') {
               fullResponse = event.data;
               if (isViewingThisSession()) {
-                if (!bubbleEl) {
-                  bubbleEl = appendMessage('assistant', '');
+                if (isTeamAgent) {
+                  // チーム: エージェントが切り替わったら新しいバブルを作成
+                  const agentName = event.agent_name || event.agent_id || 'エージェント';
+                  if (!bubbleEl || agentName !== currentTeamAgentName) {
+                    currentTeamAgentName = agentName;
+                    fullResponse = event.data;
+                    const div = document.createElement('div');
+                    div.className = 'message assistant';
+                    div.innerHTML = `
+                      <div class="msg-avatar-col"><div class="msg-avatar-letter">${escapeHtml(agentName.charAt(0))}</div></div>
+                      <div class="msg-body">
+                        <div class="team-agent-name">${escapeHtml(agentName)}</div>
+                        <div class="message-bubble">${escapeHtml(fullResponse)}</div>
+                      </div>`;
+                    streamContainer.appendChild(div);
+                    bubbleEl = div;
+                  } else {
+                    bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
+                  }
+                } else {
+                  if (!bubbleEl) {
+                    bubbleEl = appendMessage('assistant', '');
+                  }
+                  bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
                 }
-                bubbleEl.querySelector('.message-bubble').textContent = fullResponse;
                 // thinkingElを常に末尾に移動してスクロールアウトを防ぐ
                 if (thinkingEl.parentNode) streamContainer.appendChild(thinkingEl);
+              }
+            } else if (event.type === 'routing') {
+              // チームファシリテーターが次の発言者を選択
+              if (isViewingThisSession() && isTeamAgent) {
+                const agentName = event.agent_name || event.agent_id || 'エージェント';
+                const timerEl = thinkingEl.querySelector('.thinking-timer');
+                thinkingEl.innerHTML = `<div class="spinner"></div> ${escapeHtml(agentName)} が回答中 `;
+                if (timerEl) thinkingEl.appendChild(timerEl);
+                if (thinkingEl.parentNode) streamContainer.appendChild(thinkingEl);
+                bubbleEl = null; // 次のチャンクで新バブル作成
+                currentTeamAgentName = null;
+                fullResponse = '';
               }
             } else if (event.type === 'tool_use') {
               if (isViewingThisSession()) {
@@ -813,9 +914,13 @@ async function sendMessage(opts = {}) {
       return;
     }
 
-    // 完了 — Markdownレンダリング
-    if (bubbleEl && fullResponse && typeof marked !== 'undefined') {
+    // 完了 — Markdownレンダリング（チームは履歴再取得で表示）
+    if (!isTeamAgent && bubbleEl && fullResponse && typeof marked !== 'undefined') {
       bubbleEl.querySelector('.message-bubble').innerHTML = marked.parse(fullResponse);
+    }
+    if (isTeamAgent && isViewingThisSession()) {
+      // チームセッション: 完了後に履歴を再取得してマークダウンレンダリング
+      await loadSessionHistory(sentSessionId, true);
     }
 
     // 推論完了 → インジケータ除去・ストリーム追跡解除
@@ -1454,7 +1559,6 @@ async function loadSchedulerLogs() {
   }
   el.innerHTML = logs.map(log => {
     const dateStr = formatDate(log.timestamp);
-    const progress = log.total_after > 0 ? `${log.checked_after}/${log.total_after}` : '—';
     const logAgent = agents.find(a => a.id === log.agent_id);
     const agentAvatarHtml = logAgent?.thumbnail_url
       ? `<img src="${logAgent.thumbnail_url}" class="slog-avatar" alt="">`
@@ -1469,13 +1573,14 @@ async function loadSchedulerLogs() {
     const sessionLink = log.session_id
       ? `<a class="slog-link" data-session-id="${log.session_id}" title="${log.session_id}">作業セッション: ${escapeHtml(sessionTitle)}</a>`
       : '—';
+    const slogProgress = progressBarHtml(log.checked_after || 0, log.total_after || 0);
     return `<div class="scheduler-log-entry${log.error ? ' slog-has-error' : ''}">
       <div class="slog-header">
         ${agentAvatarHtml}
         <span class="slog-time">${dateStr}</span>
         <a class="slog-link slog-title" data-task-id="${log.task_id}" data-agent-id="${log.agent_id}">${escapeHtml(log.task_title || log.task_id)}</a>
-        <span class="slog-progress">${progress}</span>
       </div>
+      ${slogProgress}
       <div class="slog-steps">${stepsHtml}</div>
       <div class="slog-meta">${sessionLink}</div>
       ${errHtml}
@@ -1855,6 +1960,33 @@ function initTasks() {
 }
 
 
+function progressBarHtml(checked, total) {
+  if (!total) return '';
+  const pct = Math.round(checked / total * 100);
+  let segmentStyle = '';
+  if (total > 1) {
+    const stops = Array.from({ length: total - 1 }, (_, i) => {
+      const p = Math.round((i + 1) / total * 100);
+      return `transparent ${p}%, var(--bg-primary) ${p}%, var(--bg-primary) calc(${p}% + 3px), transparent calc(${p}% + 3px)`;
+    }).join(', ');
+    segmentStyle = `style="background-image: linear-gradient(to right, ${stops})"`;
+  }
+  return `<div class="task-progress-wrap">
+    <div class="task-progress-bar">
+      <div class="task-progress-fill" style="width:${pct}%"></div>
+      <div class="task-progress-segments" ${segmentStyle}></div>
+    </div>
+    <span class="task-progress-label">${checked} / ${total}</span>
+  </div>`;
+}
+
+function taskProgressHtml(task) {
+  const body = task.body || '';
+  const total = (body.match(/- \[[ x]\]/g) || []).length;
+  const checked = (body.match(/- \[x\]/gi) || []).length;
+  return progressBarHtml(checked, total);
+}
+
 function renderTaskList() {
   const list = document.getElementById('task-list');
   let html = '';
@@ -1877,6 +2009,7 @@ function renderTaskList() {
             ${indicator}
           </div>
         </div>
+        ${taskProgressHtml(task)}
         <div class="task-item-meta"><span>${formatTaskDate(task.created)}</span></div>
       </div>`;
   });
@@ -1913,6 +2046,7 @@ function renderTaskList() {
             <span class="task-item-title">${escapeHtml(latest.title)}</span>
           </div>
         </div>
+        ${taskProgressHtml(latest)}
         <div class="task-item-meta"><span class="badge badge-done">done</span><span>${formatTaskDate(latest.created)} 完了</span></div>
       </div>`;
 
@@ -2298,20 +2432,51 @@ function initAddAgent() {
   const cancelBtn2 = document.getElementById('add-agent-cancel-btn2');
   const submitBtn = document.getElementById('add-agent-submit-btn');
 
+  const typeSel = document.getElementById('add-agent-type');
   const cliSel = document.getElementById('add-agent-cli');
   const modelSel = document.getElementById('add-agent-model-tier');
+
+  const pathSection = document.getElementById('add-agent-path-section');
+  const cliSection = document.getElementById('add-agent-cli-section');
+  const modelSection = document.getElementById('add-agent-model-section');
+  const membersSection = document.getElementById('add-agent-members-section');
+  const membersList = document.getElementById('add-agent-members-list');
 
   cliSel.addEventListener('change', () => {
     fillModelOptions(cliSel.value, modelSel, modelSel.value);
   });
 
+  function applyTypeUI(type) {
+    const isTeam = type === 'team';
+    pathSection.style.display = isTeam ? 'none' : '';
+    cliSection.style.display = isTeam ? 'none' : '';
+    modelSection.style.display = isTeam ? 'none' : '';
+    membersSection.style.display = isTeam ? '' : 'none';
+    if (isTeam) renderMemberCheckboxes();
+  }
+
+  typeSel.addEventListener('change', () => applyTypeUI(typeSel.value));
+
+  function renderMemberCheckboxes() {
+    // 通常エージェントのみチェックボックスに表示
+    const normalAgents = agents.filter(a => a.type !== 'team');
+    membersList.innerHTML = normalAgents.map(a => `
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:4px 0;">
+        <input type="checkbox" class="member-checkbox" value="${a.id}">
+        <span>${escapeHtml(a.name)}</span>
+        <span style="color:var(--text-muted); font-size:11px;">${escapeHtml(a.description || '')}</span>
+      </label>
+    `).join('');
+  }
+
   function openForm() {
-    // フォームをリセット
     document.getElementById('add-agent-name').value = '';
     document.getElementById('add-agent-path').value = '';
     document.getElementById('add-agent-description').value = '';
+    typeSel.value = 'agent';
     cliSel.value = 'claude';
     fillModelOptions('claude', modelSel, 'quick');
+    applyTypeUI('agent');
     pane.style.display = 'flex';
   }
 
@@ -2324,23 +2489,44 @@ function initAddAgent() {
   cancelBtn2.addEventListener('click', closeForm);
 
   submitBtn.addEventListener('click', async () => {
+    const type = typeSel.value;
     const name = document.getElementById('add-agent-name').value.trim();
-    const path = document.getElementById('add-agent-path').value.trim();
     const description = document.getElementById('add-agent-description').value.trim();
-    const cli = document.getElementById('add-agent-cli').value;
-    const model_tier = document.getElementById('add-agent-model-tier').value;
 
-    if (!name || !path) {
-      showToast('名前とプロジェクトパスは必須です');
+    if (!name) {
+      showToast('名前は必須です');
       return;
     }
 
     try {
-      const resp = await fetch(`${API}/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, path, description, cli, model_tier }),
-      });
+      let resp;
+      if (type === 'team') {
+        const checked = [...membersList.querySelectorAll('.member-checkbox:checked')];
+        const members = checked.map(cb => cb.value);
+        if (members.length === 0) {
+          showToast('メンバーを1人以上選択してください');
+          return;
+        }
+        resp = await fetch(`${API}/agents/teams`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description, members }),
+        });
+      } else {
+        const path = document.getElementById('add-agent-path').value.trim();
+        const cli = document.getElementById('add-agent-cli').value;
+        const model_tier = document.getElementById('add-agent-model-tier').value;
+        if (!path) {
+          showToast('名前とプロジェクトパスは必須です');
+          return;
+        }
+        resp = await fetch(`${API}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, path, description, cli, model_tier }),
+        });
+      }
+
       if (!resp.ok) {
         const err = await resp.json();
         showToast(err.detail || 'エラーが発生しました');
