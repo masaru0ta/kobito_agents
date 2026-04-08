@@ -76,7 +76,7 @@ function renderAgents() {
       ${avatarHtml}
       <div class="agent-info">
         <div class="agent-name">${escapeHtml(a.name)}</div>
-        <div class="agent-desc">${escapeHtml(a.description || '')}</div>
+        <div class="agent-desc">${escapeHtml(a.path ? a.path.replace(/\\/g, '/').split('/').pop() : '')}</div>
       </div>
     </div>`;
   }).join('');
@@ -274,7 +274,7 @@ function renderSessions(sessions) {
         <div class="conv-header">
           <span class="conv-date">${date} 更新</span>
           <span class="conv-header-right">
-            ${s.initiated_by ? `<img class="conv-badge-thumb" src="${API}/agents/${escapeHtml(s.initiated_by)}/thumbnail" alt="">` : ''}
+            ${s.initiated_by && agents.find(a => a.id === s.initiated_by)?.thumbnail_url ? `<img class="conv-badge-thumb" src="${API}/agents/${escapeHtml(s.initiated_by)}/thumbnail" alt="">` : ''}
             <span class="conv-count">(${s.message_count})</span>
           </span>
         </div>
@@ -2407,10 +2407,16 @@ function updateSchedulerUI(data) {
     indicator.classList.add('on');
     label.textContent = 'ON';
     if (data.next_run && nextRunEl) {
-      const d = new Date(data.next_run);
-      const hh = String(d.getHours()).padStart(2, '0');
-      const mm = String(d.getMinutes()).padStart(2, '0');
-      nextRunEl.textContent = `${hh}:${mm}`;
+      const diff = Math.round((new Date(data.next_run) - Date.now()) / 1000);
+      let label;
+      if (diff <= 0) {
+        label = 'まもなく';
+      } else if (diff < 60) {
+        label = `${diff}秒後`;
+      } else {
+        label = `${Math.round(diff / 60)}分後`;
+      }
+      nextRunEl.textContent = label;
     }
   } else {
     btn.classList.remove('on');

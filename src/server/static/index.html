@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>kobito_agents</title>
-<link rel="stylesheet" href="/style.css?v=19">
+<link rel="stylesheet" href="/style.css?v=21">
 <link rel="stylesheet" href="/highlight-github-dark.min.css">
 </head>
 <body>
@@ -143,10 +143,17 @@
       </div>
       <div style="flex:1; overflow-y:auto; padding:16px;">
         <div class="settings-section">
+          <label>種別</label>
+          <select class="settings-input" id="add-agent-type">
+            <option value="agent">通常エージェント</option>
+            <option value="team">チーム</option>
+          </select>
+        </div>
+        <div class="settings-section">
           <label>名前 <span style="color:var(--danger);">*</span></label>
           <input type="text" class="settings-input" id="add-agent-name" placeholder="例: キャスパー">
         </div>
-        <div class="settings-section">
+        <div class="settings-section" id="add-agent-path-section">
           <label>プロジェクトパス <span style="color:var(--danger);">*</span></label>
           <input type="text" class="settings-input" id="add-agent-path" placeholder="例: D:/AI/code/my_project">
         </div>
@@ -154,19 +161,24 @@
           <label>説明</label>
           <input type="text" class="settings-input" id="add-agent-description" placeholder="例: ゲームデザイナー">
         </div>
-        <div class="settings-section">
+        <div class="settings-section" id="add-agent-cli-section">
           <label>CLI</label>
           <select class="settings-input" id="add-agent-cli">
             <option value="claude">claude</option>
             <option value="codex">codex</option>
           </select>
         </div>
-        <div class="settings-section">
+        <div class="settings-section" id="add-agent-model-section">
           <label>モデル</label>
           <select class="settings-input" id="add-agent-model-tier">
             <option value="quick">sonnet（標準）</option>
             <option value="deep">opus（高精度）</option>
           </select>
+        </div>
+        <!-- チーム専用: メンバー選択 -->
+        <div class="settings-section" id="add-agent-members-section" style="display:none;">
+          <label>メンバー <span style="color:var(--danger);">*</span></label>
+          <div id="add-agent-members-list" style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; padding:4px 0;"></div>
         </div>
         <div class="settings-section" style="display:flex; gap:8px;">
           <button class="settings-save-btn" id="add-agent-submit-btn">登録</button>
@@ -259,6 +271,6 @@
 
 <script src="/marked.min.js"></script>
 <script src="/highlight.min.js"></script>
-<script src="/app.js?v=19"></script>
+<script src="/app.js?v=22"></script>
 </body>
 </html>
