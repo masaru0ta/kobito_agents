@@ -1,6 +1,7 @@
 """チャット関連API"""
 
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,8 @@ from server.task_context import build_task_context
 from server.routes.deps import get_config_manager, get_session_reader, get_cli_bridge, get_startup_id
 
 router = APIRouter(prefix="/api/agents/{agent_id}", tags=["chat"])
+
+logger = logging.getLogger(__name__)
 
 
 def _update_session_meta(agent_path: str, session_id: str, updates: dict) -> dict:
@@ -100,6 +103,9 @@ async def send_chat(
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
 
+    preview = body.message[:20].replace("\n", " ")
+    logger.info("チャット受信 agent=%s 「%s」", agent.name, preview)
+
     tier = body.model_tier or agent.model_tier
     model = resolve_model(agent.cli, tier)
 
@@ -132,9 +138,13 @@ async def send_chat(
                     yield ": ping\n\n"
                     continue
                 ev = parse_stream_event(raw_event)
-                if ev.event_type == "assistant" and ev.text:
-                    accumulated_text += ev.text
-                    yield f"data: {json.dumps({'type': 'chunk', 'data': accumulated_text}, ensure_ascii=False)}\n\n"
+                if ev.event_type == "assistant":
+                    sid_label = (body.session_id or "new")[:8]
+                    if ev.text:
+                        accumulated_text += ev.text
+                        chunk_preview = ev.text[:20].replace("\n", " ")
+                        logger.info("チャンク受信 agent=%s 「%s」 sid=%s", agent.name, chunk_preview, sid_label)
+                        yield f"data: {json.dumps({'type': 'chunk', 'data': accumulated_text}, ensure_ascii=False)}\n\n"
                     for tu in ev.tool_uses:
                         desc = tu.get("name", "")
                         inp = tu.get("input", {})
@@ -142,6 +152,7 @@ async def send_chat(
                             desc += f": {inp['file_path'].split('/')[-1].split(chr(92))[-1]}"
                         elif inp.get("command"):
                             desc += f": {inp['command'][:60]}"
+                        logger.info("ツール実行 agent=%s %s sid=%s", agent.name, desc, sid_label)
                         yield f"data: {json.dumps({'type': 'tool_use', 'data': desc}, ensure_ascii=False)}\n\n"
                 elif ev.event_type == "result":
                     got_result = True

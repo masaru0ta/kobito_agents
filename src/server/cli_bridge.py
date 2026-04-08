@@ -528,7 +528,7 @@ class CLIBridge:
 
             # 既存プロセスが死んでいる場合は除去
             if mp and not mp.alive:
-                logger.info(f"プロセス死亡検出: {key}")
+                logger.info(f"プロセス異常終了を検出: {key}")
                 del self._pool[key]
                 mp = None
 
@@ -641,7 +641,7 @@ class CLIBridge:
                         logger.debug("result event sid=%s pid=%s", mp.session_id, mp.proc.pid)
                         break
             finally:
-                logger.info("run_stream終了 reason=%s last_event=%s sid=%s pid=%s", exit_reason, last_event_type, mp.session_id[:8] if mp.session_id else "?", mp.proc.pid)
+                logger.debug("run_stream終了 reason=%s last_event=%s sid=%s pid=%s", exit_reason, last_event_type, mp.session_id[:8] if mp.session_id else "?", mp.proc.pid)
 
     async def _cleanup_loop(self) -> None:
         """アイドルプロセスを定期的に終了する"""
@@ -654,7 +654,7 @@ class CLIBridge:
                     if not mp.alive:
                         to_remove.append(key)
                     elif now - mp.last_used > self.IDLE_TIMEOUT:
-                        logger.info(f"アイドルタイムアウト: {key}")
+                        logger.info(f"アイドルタイムアウトによりプロセス終了: {key}")
                         mp.kill()
                         to_remove.append(key)
                 for key in to_remove:
