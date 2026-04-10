@@ -14,12 +14,14 @@ from pydantic import BaseModel
 class AgentInfo(BaseModel):
     id: str
     name: str
-    path: str
+    path: str = ""
     description: str = ""
     cli: str = "claude"
     model_tier: str = "quick"
     system_prompt: str = ""
     thumbnail_url: str | None = None
+    type: str = "agent"
+    members: list[str] = []
 
 
 class AgentNotFoundError(Exception):
@@ -105,12 +107,18 @@ class ConfigManager:
             return True
         return False
 
+    def _agent_system_prompt(self, agent: dict) -> str:
+        path = agent.get("path", "")
+        if not path:
+            return ""
+        return self._read_system_prompt(path, agent.get("cli", "claude"))
+
     def list_agents(self) -> list[AgentInfo]:
         agents = self._read_agents()
         return [
             AgentInfo(
                 **agent,
-                system_prompt=self._read_system_prompt(agent["path"], agent.get("cli", "claude")),
+                system_prompt=self._agent_system_prompt(agent),
                 thumbnail_url=self.get_thumbnail_url(agent["id"]),
             )
             for agent in agents
@@ -121,7 +129,7 @@ class ConfigManager:
             if agent["id"] == agent_id:
                 return AgentInfo(
                     **agent,
-                    system_prompt=self._read_system_prompt(agent["path"], agent.get("cli", "claude")),
+                    system_prompt=self._agent_system_prompt(agent),
                     thumbnail_url=self.get_thumbnail_url(agent_id),
                 )
         raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
@@ -137,7 +145,7 @@ class ConfigManager:
                 self._write_agents(agents)
                 return AgentInfo(
                     **agent,
-                    system_prompt=self._read_system_prompt(agent["path"], agent.get("cli", "claude")),
+                    system_prompt=self._agent_system_prompt(agent),
                 )
         raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
 
@@ -146,6 +154,12 @@ class ConfigManager:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=3))
         return f"agent_{ts}_{suffix}"
+
+    def _generate_team_id(self) -> str:
+        """team_{YYYYMMDDHHmmss}_{ランダム3文字} 形式のIDを生成"""
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=3))
+        return f"team_{ts}_{suffix}"
 
     def add_agent(
         self, name: str, path: str, description: str, cli: str, model_tier: str
@@ -183,6 +197,27 @@ class ConfigManager:
             system_prompt=self._read_system_prompt(path, cli),
         )
 
+    def add_team(self, name: str, description: str, members: list[str]) -> AgentInfo:
+        """チームエージェントを新規登録する"""
+        if not name:
+            raise ValueError("name は空にできません")
+        if not members:
+            raise ValueError("members は空にできません")
+
+        new_team = {
+            "id": self._generate_team_id(),
+            "name": name,
+            "path": "",
+            "description": description,
+            "type": "team",
+            "members": members,
+        }
+        agents = self._read_agents()
+        agents.append(new_team)
+        self._write_agents(agents)
+
+        return AgentInfo(**new_team)
+
     def delete_agent(self, agent_id: str) -> None:
         """エージェントの登録を解除する（systemは削除不可）"""
         if agent_id == "system":
@@ -204,11 +239,17 @@ class ConfigManager:
         agent = self.get_agent(agent_id)
         self._system_prompt_file(agent.path, agent.cli).write_text(content, encoding="utf-8")
 
+    _SETTING_DEFAULTS: dict = {
+        "lmstudio_url": "http://localhost:1234/v1",
+        "team_max_turns": 20,
+    }
+
     def get_setting(self, key: str, default=None):
+        resolved_default = self._SETTING_DEFAULTS.get(key, default)
         if not self._settings_file.exists():
-            return default
+            return resolved_default
         data = json.loads(self._settings_file.read_text(encoding="utf-8"))
-        return data.get(key, default)
+        return data.get(key, resolved_default)
 
     def set_setting(self, key: str, value) -> None:
         data = {}

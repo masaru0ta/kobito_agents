@@ -507,3 +507,185 @@ class TestSchedulerToggleAPI:
 
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+
+
+# ================================================================
+# Scheduler — 定期リセット統合テスト
+# ================================================================
+
+TASK_RECURRING_DONE = """\
+---
+title: 定期タスク
+agent: system
+phase: done
+---
+
+- [x] ステップ1
+- [x] ステップ2
+"""
+
+TASK_NOT_RECURRING = """\
+---
+title: 通常タスク
+agent: system
+---
+
+- [x] ステップ1
+"""
+
+
+def _create_task_with_meta(project_dir: Path, task_id: str, content: str, meta_extra: dict):
+    """タスクファイルと定期設定メタデータを作成する"""
+    (project_dir / "tasks" / f"{task_id}.md").write_text(content, encoding="utf-8")
+    meta = {
+        "task_id": task_id,
+        "approval": "approved",
+        "approved_at": "2026-04-01T00:00:00+00:00",
+        "sessions": [],
+        "talk_session_id": None,
+        **meta_extra,
+    }
+    (project_dir / ".kobito" / "tasks" / f"{task_id}.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+class TestProcessRecurringResets:
+    """_process_recurring_resets — 定期リセット統合テスト"""
+
+    def test_every_check定期タスクがリセットされる(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_rec", TASK_RECURRING_DONE, {
+            "reset_interval": "every_check",
+            "repeat_enabled": None,
+            "last_reset_at": None,
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+        sched._process_recurring_resets(now)
+
+        meta_path = project_dir / ".kobito" / "tasks" / "task_rec.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["last_reset_at"] == now.isoformat()
+
+    def test_チェックボックスが未完了に戻る(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_rec", TASK_RECURRING_DONE, {
+            "reset_interval": "every_check",
+            "repeat_enabled": None,
+            "last_reset_at": None,
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+        sched._process_recurring_resets(now)
+
+        md = (project_dir / "tasks" / "task_rec.md").read_text(encoding="utf-8")
+        assert "- [ ] ステップ1" in md
+        assert "- [ ] ステップ2" in md
+        assert "- [x]" not in md.lower()
+
+    def test_リセット後にphaseがdoneでなくなる(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        from server.task_manager import TaskManager
+        _create_task_with_meta(project_dir, "task_rec", TASK_RECURRING_DONE, {
+            "reset_interval": "every_check",
+            "repeat_enabled": None,
+            "last_reset_at": None,
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+        sched._process_recurring_resets(now)
+
+        tm = TaskManager(project_dir)
+        task = tm.get_task("task_rec")
+        assert task.phase != "done"
+
+    def test_repeat_enabled_falseならリセットしない(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_rec", TASK_RECURRING_DONE, {
+            "reset_interval": "every_check",
+            "repeat_enabled": False,
+            "last_reset_at": None,
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+        sched._process_recurring_resets(now)
+
+        meta_path = project_dir / ".kobito" / "tasks" / "task_rec.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["last_reset_at"] is None  # リセットされていない
+
+    def test_非定期タスクはスキップされる(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_normal", TASK_NOT_RECURRING, {
+            "reset_interval": None,
+            "repeat_enabled": None,
+            "last_reset_at": None,
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+        sched._process_recurring_resets(now)
+
+        meta_path = project_dir / ".kobito" / "tasks" / "task_normal.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["last_reset_at"] is None
+
+    def test_daily_リセット時刻前はリセットしない(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_daily", TASK_RECURRING_DONE, {
+            "reset_interval": "daily",
+            "reset_time": "09:00",
+            "repeat_enabled": None,
+            "last_reset_at": None,
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 8, 55, 0, tzinfo=timezone.utc)  # 08:55 — 09:00前
+
+        sched._process_recurring_resets(now)
+
+        meta_path = project_dir / ".kobito" / "tasks" / "task_daily.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["last_reset_at"] is None
+
+    def test_daily_リセット時刻後はリセットする(self, project_dir, mock_bridge, mock_config):
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_daily", TASK_RECURRING_DONE, {
+            "reset_interval": "daily",
+            "reset_time": "09:00",
+            "repeat_enabled": None,
+            "last_reset_at": "2026-04-09T09:00:00+00:00",  # 前日リセット
+        })
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        now = datetime(2026, 4, 10, 9, 5, 0, tzinfo=timezone.utc)  # 09:05 — リセット時刻後
+
+        sched._process_recurring_resets(now)
+
+        meta_path = project_dir / ".kobito" / "tasks" / "task_daily.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["last_reset_at"] == now.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_tick実行時に定期リセットが呼ばれる(self, project_dir, mock_bridge, mock_config):
+        """tick() → _process_recurring_resets → reset 実行の結合テスト"""
+        from server.scheduler import Scheduler
+        _create_task_with_meta(project_dir, "task_rec", TASK_RECURRING_DONE, {
+            "reset_interval": "every_check",
+            "repeat_enabled": None,
+            "last_reset_at": None,
+        })
+
+        sched = Scheduler(config_manager=mock_config, cli_bridge=mock_bridge)
+        with patch("server.scheduler.asyncio.create_task"):
+            sched.toggle()  # ON
+
+        with patch("server.scheduler.asyncio.create_task"):
+            await sched.tick()
+
+        meta_path = project_dir / ".kobito" / "tasks" / "task_rec.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["last_reset_at"] is not None

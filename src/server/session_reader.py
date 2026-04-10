@@ -30,7 +30,7 @@ class SessionSummary(BaseModel):
 
 class SessionReader(ABC):
     @abstractmethod
-    def list_sessions(self, project_path: str) -> list[SessionSummary]:
+    def list_sessions(self, project_path: str, cli: str = "claude") -> list[SessionSummary]:
         ...
 
     @abstractmethod
@@ -167,7 +167,7 @@ class ClaudeSessionReader(SessionReader):
             cli=meta.get("cli", "claude"),
         )
 
-    def list_sessions(self, project_path: str) -> list[SessionSummary]:
+    def list_sessions(self, project_path: str, cli: str = "claude") -> list[SessionSummary]:
         sessions_dir = self._sessions_dir(project_path)
         if not sessions_dir.exists():
             return []
@@ -285,7 +285,7 @@ class CodexSessionReader(SessionReader):
                     messages.append(SessionMessage(role="assistant", content=text, timestamp=timestamp))
         return messages
 
-    def list_sessions(self, project_path: str) -> list[SessionSummary]:
+    def list_sessions(self, project_path: str, cli: str = "claude") -> list[SessionSummary]:
         """kobito meta から cli=="codex" のセッションを収集する"""
         meta_dir = Path(project_path) / ".kobito" / "meta"
         if not meta_dir.exists():
@@ -363,9 +363,9 @@ class CodexSessionReader(SessionReader):
 class AgentSessionReader:
     """エージェントの cli 種別に応じて適切な SessionReader へ委譲する"""
 
-    def __init__(self):
+    def __init__(self, claude_home: "Path | None" = None):
         self._readers: dict[str, SessionReader] = {
-            "claude": ClaudeSessionReader(),
+            "claude": ClaudeSessionReader(claude_home=claude_home),
             "codex":  CodexSessionReader(),
         }
 

@@ -22,6 +22,7 @@ let currentStreamAbort = null; // 現在アクティブなSSEストリームのA
 document.addEventListener('DOMContentLoaded', async () => {
   await loadAgents();
   initTabs();
+  initDashboard();
   initResize();
   initInput();
   initActions();
@@ -90,6 +91,8 @@ async function selectAgent(agentId) {
   currentAgentId = agentId;
   currentSessionId = null;
   renderAgents();
+  switchTab('dashboard');
+  await loadDashboard();
   await loadSessions();
   clearChat();
   loadSettingsData();
@@ -1104,6 +1107,7 @@ function switchTab(tabName) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
 
+  const dashboardContent = document.getElementById('dashboard-tab-content');
   const chatContent = document.getElementById('chat-tab-content');
   const settingsContent = document.getElementById('settings-tab-content');
   const tasksContent = document.getElementById('tasks-tab-content');
@@ -1112,6 +1116,7 @@ function switchTab(tabName) {
   const settingsPane = document.getElementById('settings-pane');
 
   // 中央ペインを切り替え
+  dashboardContent.style.display = 'none';
   chatContent.style.display = 'none';
   settingsContent.classList.remove('visible');
   tasksContent.style.display = 'none';
@@ -1120,7 +1125,10 @@ function switchTab(tabName) {
   // 右ペインを切り替え
   settingsPane.classList.remove('visible');
 
-  if (tabName === 'chat') {
+  if (tabName === 'dashboard') {
+    dashboardContent.style.display = 'flex';
+    chatPane.classList.add('hidden');
+  } else if (tabName === 'chat') {
     chatContent.style.display = 'flex';
     chatPane.classList.remove('hidden');
   } else if (tabName === 'tasks') {
@@ -1412,6 +1420,81 @@ async function openFileByPath(filepath) {
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return openImageFile(filepath);
   if (ext === 'json') return openJsonFile(filepath);
   return openCodeFile(filepath);
+}
+
+// ============================================================
+// ダッシュボード
+// ============================================================
+
+let dashboardRawContent = '';
+
+async function loadDashboard() {
+  if (!currentAgentId) return;
+  try {
+    const resp = await fetch(`${API}/agents/${currentAgentId}/dashboard`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    dashboardRawContent = data.content || '';
+    renderDashboardView();
+  } catch (e) {
+    console.error('dashboard load error', e);
+  }
+}
+
+function renderDashboardView() {
+  const view = document.getElementById('dashboard-view');
+  const editView = document.getElementById('dashboard-edit-view');
+  view.style.display = '';
+  editView.style.display = 'none';
+
+  const html = dashboardRawContent
+    ? marked.parse(dashboardRawContent)
+    : '<p style="color:var(--text-muted); font-size:13px;">ダッシュボードはまだ作成されていません。「編集」から内容を追加できます。</p>';
+  view.innerHTML = html;
+
+  // ファイルリンクのクリックハンドラ
+  view.querySelectorAll('a[href]').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('http')) return;
+    a.addEventListener('click', async e => {
+      e.preventDefault();
+      const filepath = href.replace(/^\//, '');
+      switchTab('reports');
+      const parts = filepath.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+      await renderFileDir(dir);
+      await openFileByPath(filepath);
+    });
+  });
+}
+
+async function saveDashboard() {
+  if (!currentAgentId) return;
+  const content = document.getElementById('dashboard-editor').value;
+  await fetch(`${API}/agents/${currentAgentId}/dashboard`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  dashboardRawContent = content;
+  renderDashboardView();
+}
+
+function initDashboard() {
+  document.getElementById('dashboard-edit-btn').addEventListener('click', () => {
+    document.getElementById('dashboard-view').style.display = 'none';
+    const editView = document.getElementById('dashboard-edit-view');
+    editView.style.display = 'flex';
+    document.getElementById('dashboard-editor').value = dashboardRawContent;
+  });
+
+  document.getElementById('dashboard-save-btn').addEventListener('click', async () => {
+    await saveDashboard();
+  });
+
+  document.getElementById('dashboard-cancel-btn').addEventListener('click', () => {
+    renderDashboardView();
+  });
 }
 
 function initReports() {
@@ -1957,6 +2040,116 @@ function initTasks() {
     await loadTasks();
   });
 
+  document.getElementById('ctx-recurring').addEventListener('click', async () => {
+    document.getElementById('task-context-menu').classList.remove('visible');
+    if (!taskContextMenuId) return;
+    await openRecurringPanel(taskContextMenuId);
+  });
+
+  initRecurringPanel();
+}
+
+// ----------------------------------------------------------------
+// 定期タスク設定パネル（Phase10）
+// ----------------------------------------------------------------
+
+function initRecurringPanel() {
+  const panel = document.getElementById('recurring-panel');
+  const intervalSelect = document.getElementById('recurring-interval-select');
+
+  document.getElementById('recurring-close-btn').addEventListener('click', () => {
+    panel.style.display = 'none';
+  });
+
+  panel.addEventListener('click', (e) => {
+    if (e.target === panel) panel.style.display = 'none';
+  });
+
+  intervalSelect.addEventListener('change', () => {
+    updateRecurringFields(intervalSelect.value);
+  });
+
+  document.getElementById('recurring-save-btn').addEventListener('click', async () => {
+    await saveRecurring();
+  });
+
+  document.getElementById('recurring-clear-btn').addEventListener('click', async () => {
+    await clearRecurring();
+  });
+}
+
+function updateRecurringFields(interval) {
+  const timeRow = document.getElementById('recurring-time-row');
+  const weekdayRow = document.getElementById('recurring-weekday-row');
+  const monthdayRow = document.getElementById('recurring-monthday-row');
+  const enabledRow = document.getElementById('recurring-enabled-row');
+
+  timeRow.style.display = ['hourly', 'daily', 'weekly', 'monthly'].includes(interval) ? '' : 'none';
+  weekdayRow.style.display = interval === 'weekly' ? '' : 'none';
+  monthdayRow.style.display = interval === 'monthly' ? '' : 'none';
+  enabledRow.style.display = interval ? '' : 'none';
+}
+
+async function openRecurringPanel(taskId) {
+  const panel = document.getElementById('recurring-panel');
+  const intervalSelect = document.getElementById('recurring-interval-select');
+  const timeInput = document.getElementById('recurring-time-input');
+  const weekdaySelect = document.getElementById('recurring-weekday-select');
+  const monthdayInput = document.getElementById('recurring-monthday-input');
+  const enabledToggle = document.getElementById('recurring-enabled-toggle');
+
+  // 現在の設定を取得
+  const resp = await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/recurring`);
+  const data = await resp.json();
+
+  intervalSelect.value = data.reset_interval || '';
+  timeInput.value = data.reset_time || '09:00';
+  weekdaySelect.value = data.reset_weekday || 'monday';
+  monthdayInput.value = data.reset_monthday || 1;
+  enabledToggle.checked = data.repeat_enabled !== false;
+
+  updateRecurringFields(intervalSelect.value);
+  panel.style.display = 'flex';
+  panel.dataset.taskId = taskId;
+}
+
+async function saveRecurring() {
+  const panel = document.getElementById('recurring-panel');
+  const taskId = panel.dataset.taskId;
+  const interval = document.getElementById('recurring-interval-select').value;
+
+  if (!interval) {
+    await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/recurring`, { method: 'DELETE' });
+    panel.style.display = 'none';
+    return;
+  }
+
+  const body = { reset_interval: interval };
+  if (['hourly', 'daily', 'weekly', 'monthly'].includes(interval)) {
+    body.reset_time = document.getElementById('recurring-time-input').value;
+  }
+  if (interval === 'weekly') {
+    body.reset_weekday = document.getElementById('recurring-weekday-select').value;
+  }
+  if (interval === 'monthly') {
+    body.reset_monthday = parseInt(document.getElementById('recurring-monthday-input').value, 10);
+  }
+  const enabled = document.getElementById('recurring-enabled-toggle').checked;
+  if (!enabled) body.repeat_enabled = false;
+
+  await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/recurring`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  panel.style.display = 'none';
+}
+
+async function clearRecurring() {
+  const panel = document.getElementById('recurring-panel');
+  const taskId = panel.dataset.taskId;
+  await fetch(`${API}/agents/${currentAgentId}/tasks/${taskId}/recurring`, { method: 'DELETE' });
+  panel.style.display = 'none';
 }
 
 
@@ -1978,6 +2171,28 @@ function progressBarHtml(checked, total) {
     </div>
     <span class="task-progress-label">${checked} / ${total}</span>
   </div>`;
+}
+
+const WEEKDAY_JA = { monday:'月', tuesday:'火', wednesday:'水', thursday:'木', friday:'金', saturday:'土', sunday:'日' };
+
+function recurringLabel(task) {
+  if (!task.is_recurring) return '';
+  const disabled = task.repeat_enabled === false;
+  const t = task.reset_time || '';
+  let text = '';
+  switch (task.reset_interval) {
+    case 'every_check': text = 'チェック完了時'; break;
+    case 'hourly':      text = `毎時${t}`; break;
+    case 'daily':       text = `毎日 ${t}`; break;
+    case 'weekly': {
+      const wd = WEEKDAY_JA[task.reset_weekday] ?? task.reset_weekday ?? '';
+      text = `毎週 ${wd}曜 ${t}`;
+      break;
+    }
+    case 'monthly':     text = `毎月 ${task.reset_monthday}日 ${t}`; break;
+    default:            text = task.reset_interval;
+  }
+  return disabled ? `<span class="badge badge-recurring disabled" title="定期リセット（無効）">↻ ${text}</span>` : `<span class="badge badge-recurring" title="定期リセット">↻ ${text}</span>`;
 }
 
 function taskProgressHtml(task) {
@@ -2007,6 +2222,7 @@ function renderTaskList() {
           <div class="task-title-group">
             <span class="task-item-title">${escapeHtml(task.title)}</span>
             ${indicator}
+            ${recurringLabel(task)}
           </div>
         </div>
         ${taskProgressHtml(task)}
@@ -2025,6 +2241,7 @@ function renderTaskList() {
         <div class="task-item-header">
           <div class="task-title-group">
             <span class="task-item-title">${escapeHtml(task.title)}</span>
+            ${recurringLabel(task)}
           </div>
         </div>
         <div class="task-item-meta"><span class="badge badge-pending">承認待ち</span><span>${formatTaskDate(task.created)}</span></div>
@@ -2044,6 +2261,7 @@ function renderTaskList() {
         <div class="task-item-header">
           <div class="task-title-group">
             <span class="task-item-title">${escapeHtml(latest.title)}</span>
+            ${recurringLabel(latest)}
           </div>
         </div>
         ${taskProgressHtml(latest)}
@@ -2058,6 +2276,7 @@ function renderTaskList() {
             <div class="task-item-header">
               <div class="task-title-group">
                 <span class="task-item-title">${escapeHtml(task.title)}</span>
+                ${recurringLabel(task)}
               </div>
             </div>
             <div class="task-item-meta"><span class="badge badge-done">done</span><span>${formatTaskDate(task.created)} 完了</span></div>
@@ -2189,6 +2408,7 @@ async function renderTaskDetail(taskId) {
       <div class="task-meta-item">${approvalHtml || ''}</div>
       <div class="task-meta-item"><span class="task-meta-label">起票:</span><span>${created}</span></div>
       ${task.schedule ? `<div class="task-meta-item"><span class="task-meta-label">スケジュール:</span><span>${escapeHtml(task.schedule)}</span></div>` : ''}
+      ${task.is_recurring ? `<div class="task-meta-item"><span class="task-meta-label">定期リセット:</span>${recurringLabel(task)}</div>` : ''}
       ${task.talk_session_id ? (() => {
         const s = sessions.find(s => s.session_id === task.talk_session_id);
         return s ? `<div class="task-meta-item"><span class="task-meta-label">相談セッション:</span><a class="task-session-link" data-session-id="${task.talk_session_id}">${escapeHtml(s.title || s.session_id)}</a></div>` : '';

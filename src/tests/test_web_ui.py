@@ -9,7 +9,7 @@ import uvicorn
 
 from server.app import create_app
 from server.config import ConfigManager
-from server.session_reader import ClaudeSessionReader
+from server.session_reader import AgentSessionReader
 from server.cli_bridge import CLIBridge
 from tests.conftest import make_session_jsonl
 
@@ -93,7 +93,7 @@ def test_env(tmp_path_factory):
 
     # サーバー起動
     config = ConfigManager(data_dir=data_dir, system_path=str(project_dir))
-    reader = ClaudeSessionReader(claude_home=base / ".claude")
+    reader = AgentSessionReader(claude_home=base / ".claude")
     bridge = CLIBridge()
     app = create_app(config_manager=config, session_reader=reader, cli_bridge=bridge)
 
@@ -137,18 +137,29 @@ class TestSidebar:
         assert "レプリカ" in text
 
 
+def _switch_to_chat_tab(page, url: str):
+    """エージェント自動選択後にセッションタブに切り替える"""
+    page.goto(url)
+    page.wait_for_selector(".agent-item")
+    # ダッシュボードタブがアクティブになるまで待つ（アプリ完全初期化の指標）
+    page.wait_for_selector(".tab[data-tab='dashboard'].active")
+    page.click(".tab[data-tab='chat']")
+    # チャットタブがアクティブになるまで待つ（タブ切り替え完了の指標）
+    page.wait_for_selector(".tab[data-tab='chat'].active")
+
+
 class TestSessionList:
     """中央ペイン: セッションリスト"""
 
     def test_セッション一覧が表示される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
 
         items = page.query_selector_all(".conversation-item")
         assert len(items) == 3
 
     def test_セッション一覧に件数が表示される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conv-count")
 
         counts = page.query_selector_all(".conv-count")
@@ -157,7 +168,7 @@ class TestSessionList:
         assert "(4)" in texts or "(2)" in texts
 
     def test_セッション一覧にプレビューが表示される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conv-preview")
 
         text = page.text_content(".conversation-list")
@@ -168,7 +179,7 @@ class TestChatPane:
     """右ペイン: チャット画面"""
 
     def test_セッション選択でチャット履歴が表示される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
 
         # 最初のセッションをクリック
@@ -179,7 +190,7 @@ class TestChatPane:
         assert len(messages) >= 2
 
     def test_ユーザーメッセージが右寄せで表示される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         page.query_selector(".conversation-item").click()
         page.wait_for_selector(".message.user")
@@ -188,7 +199,7 @@ class TestChatPane:
         assert user_msg is not None
 
     def test_ツール使用通知が表示される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         # sess-001（tool_use付き）を選択。一覧は新しい順なのでsess-002が先、sess-001が2番目
         items = page.query_selector_all(".conversation-item")
@@ -201,7 +212,7 @@ class TestChatPane:
         assert "Read" in tool.text_content()
 
     def test_新規会話ボタンが存在する(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".new-chat-btn")
 
         btn = page.query_selector(".new-chat-btn")
@@ -250,7 +261,7 @@ class TestMessageRendering:
     """メッセージ表示の品質"""
 
     def test_空メッセージはスキップされる(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         # sess-003を選択（空メッセージを含む）
         items = page.query_selector_all(".conversation-item")
@@ -267,7 +278,7 @@ class TestMessageRendering:
             assert len(text) > 0, "空のメッセージバブルが表示されている"
 
     def test_Markdownがレンダリングされる(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         items = page.query_selector_all(".conversation-item")
         for item in items:
@@ -280,7 +291,7 @@ class TestMessageRendering:
         assert strong is not None, "Markdownの太字がレンダリングされていない"
 
     def test_改行が反映される(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         items = page.query_selector_all(".conversation-item")
         for item in items:
@@ -308,7 +319,7 @@ class TestChatActions:
     """チャットヘッダーのアクション（メニュー内）"""
 
     def test_非表示ボタンが存在する(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         page.query_selector(".conversation-item").click()
         page.wait_for_selector("#chat-menu-btn")
@@ -322,7 +333,7 @@ class TestChatActions:
         assert "非表示" in btn.text_content()
 
     def test_CLI起動ボタンが存在する(self, test_env, page):
-        page.goto(test_env["url"])
+        _switch_to_chat_tab(page, test_env["url"])
         page.wait_for_selector(".conversation-item")
         page.query_selector(".conversation-item").click()
         page.wait_for_selector("#chat-menu-btn")

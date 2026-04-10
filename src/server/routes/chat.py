@@ -103,8 +103,11 @@ async def send_chat(
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail=f"エージェント '{agent_id}' が見つかりません")
 
-    preview = body.message[:20].replace("\n", " ")
-    logger.info("チャット受信 agent=%s 「%s」", agent.name, preview)
+    logger.info("チャット受信", extra={
+        "chat_event": "recv",
+        "chat_agent": agent.name,
+        "chat_preview": body.message[:20].replace("\n", " "),
+    })
 
     tier = body.model_tier or agent.model_tier
     model = resolve_model(agent.cli, tier)
@@ -142,8 +145,12 @@ async def send_chat(
                     sid_label = (body.session_id or "new")[:8]
                     if ev.text:
                         accumulated_text += ev.text
-                        chunk_preview = ev.text[:20].replace("\n", " ")
-                        logger.info("チャンク受信 agent=%s 「%s」 sid=%s", agent.name, chunk_preview, sid_label)
+                        logger.info("チャンク受信", extra={
+                            "chat_event": "chunk",
+                            "chat_agent": agent.name,
+                            "chat_preview": ev.text[:20].replace("\n", " "),
+                            "chat_sid": sid_label,
+                        })
                         yield f"data: {json.dumps({'type': 'chunk', 'data': accumulated_text}, ensure_ascii=False)}\n\n"
                     for tu in ev.tool_uses:
                         desc = tu.get("name", "")
@@ -152,7 +159,11 @@ async def send_chat(
                             desc += f": {inp['file_path'].split('/')[-1].split(chr(92))[-1]}"
                         elif inp.get("command"):
                             desc += f": {inp['command'][:60]}"
-                        logger.info("ツール実行 agent=%s %s sid=%s", agent.name, desc, sid_label)
+                        logger.info("ツール実行", extra={
+                            "tool_agent": agent.name,
+                            "tool_desc": desc,
+                            "tool_sid": sid_label,
+                        })
                         yield f"data: {json.dumps({'type': 'tool_use', 'data': desc}, ensure_ascii=False)}\n\n"
                 elif ev.event_type == "result":
                     got_result = True
@@ -162,13 +173,13 @@ async def send_chat(
                     yield f"data: {json.dumps({'type': 'session_id', 'data': ev.session_id}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            print(f"[STREAM] 例外発生 agent={agent_id} sid={body.session_id}: {type(e).__name__}: {e}", flush=True)
+            logger.error("ストリーム例外 agent=%s sid=%s: %s: %s", agent_id, body.session_id, type(e).__name__, e)
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
             return
 
         if not got_result:
             # プロセス異常終了などでresultイベントが来なかった場合（サーバー再起動時を含む）
-            print(f"[STREAM] got_result=False agent={agent_id} sid={body.session_id} (プロセス異常終了またはサーバー再起動)", flush=True)
+            logger.warning("ストリーム未完了 agent=%s sid=%s (プロセス異常終了またはサーバー再起動)", agent_id, body.session_id)
             yield f"data: {json.dumps({'type': 'error', 'data': 'サーバーが再起動されました。再度送信してください。'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

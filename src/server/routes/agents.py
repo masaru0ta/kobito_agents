@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from server.config import AgentInfo, AgentNotFoundError, ConfigManager, DuplicatePathError, SystemAgentProtectedError
+
 from server.routes.deps import get_config_manager
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -24,6 +25,7 @@ def _agent_dict(a: AgentInfo) -> dict:
         "id": a.id, "name": a.name, "path": a.path,
         "description": a.description, "cli": a.cli, "model_tier": a.model_tier,
         "thumbnail_url": a.thumbnail_url,
+        "type": a.type, "members": a.members,
     }
 
 
@@ -33,6 +35,12 @@ class AgentCreateRequest(BaseModel):
     description: str = ""
     cli: str = "claude"
     model_tier: str = "quick"
+
+
+class TeamCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    members: list[str]
 
 
 class AgentUpdateRequest(BaseModel):
@@ -62,6 +70,17 @@ def create_agent(body: AgentCreateRequest, config: ConfigManager = Depends(get_c
         raise HTTPException(status_code=400, detail=str(e))
     except DuplicatePathError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    return _agent_dict(a)
+
+
+@router.post("/teams")
+def create_team(body: TeamCreateRequest, config: ConfigManager = Depends(get_config_manager)):
+    if not body.members:
+        raise HTTPException(status_code=400, detail="メンバーを1人以上指定してください")
+    try:
+        a = config.add_team(name=body.name, description=body.description, members=body.members)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return _agent_dict(a)
 
 

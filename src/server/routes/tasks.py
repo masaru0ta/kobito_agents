@@ -136,3 +136,52 @@ async def update_task_body(agent_id: str, task_id: str, update: TaskBodyUpdate, 
         return tm.update_body(task_id, update.body).model_dump()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"タスク '{task_id}' が見つかりません")
+
+
+# ----------------------------------------------------------------
+# 定期タスク設定 API（Phase10）
+# ----------------------------------------------------------------
+
+
+class RecurringBody(BaseModel):
+    reset_interval: str
+    reset_time: str | None = None
+    reset_weekday: str | None = None
+    reset_monthday: int | None = None
+    repeat_enabled: bool | None = None
+
+
+@router.get("/api/agents/{agent_id}/tasks/{task_id}/recurring")
+async def get_recurring(agent_id: str, task_id: str, cfg: ConfigManager = Depends(get_config_manager)):
+    tm = _get_task_manager(agent_id, cfg)
+    try:
+        return tm.get_recurring(task_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"タスク '{task_id}' が見つかりません")
+
+
+@router.put("/api/agents/{agent_id}/tasks/{task_id}/recurring")
+async def set_recurring(agent_id: str, task_id: str, body: RecurringBody, cfg: ConfigManager = Depends(get_config_manager)):
+    tm = _get_task_manager(agent_id, cfg)
+    try:
+        tm.set_recurring(
+            task_id,
+            reset_interval=body.reset_interval,
+            reset_time=body.reset_time,
+            reset_weekday=body.reset_weekday,
+            reset_monthday=body.reset_monthday,
+            repeat_enabled=body.repeat_enabled,
+        )
+        return tm.get_recurring(task_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"タスク '{task_id}' が見つかりません")
+
+
+@router.delete("/api/agents/{agent_id}/tasks/{task_id}/recurring")
+async def clear_recurring(agent_id: str, task_id: str, cfg: ConfigManager = Depends(get_config_manager)):
+    tm = _get_task_manager(agent_id, cfg)
+    try:
+        tm.clear_recurring(task_id)
+        return tm.get_recurring(task_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"タスク '{task_id}' が見つかりません")

@@ -385,6 +385,8 @@ body {
 
 .badge-done { background: #484f5833; color: var(--text-secondary); border: 1px solid var(--text-muted); }
 .badge-pending { background: #d2992233; color: var(--warning); border: 1px solid var(--warning); }
+.badge-recurring { background: #1a6b4a33; color: #4caf87; border: 1px solid #4caf87; font-size: 11px; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+.badge-recurring.disabled { background: #48484833; color: var(--text-muted); border-color: var(--text-muted); }
 
 /* ドラッグハンドル */
 .drag-handle {
@@ -775,3 +777,42 @@ body {
 .json-num  { color: #f8c555; }
 .json-bool { color: #79b8ff; }
 .json-null { color: #959da5; }
+
+/* ===== ダッシュボード ===== */
+#dashboard-tab-content { flex-direction: column; }
+.dashboard-header { height: 44px; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
+.dashboard-header-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.dashboard-edit-btn { background: transparent; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); font-size: 12px; padding: 4px 10px; cursor: pointer; }
+.dashboard-edit-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.dashboard-edit-footer { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
+.dashboard-save-btn { background: var(--accent); border: none; border-radius: 5px; color: #0d1117; font-size: 12px; font-weight: 600; padding: 5px 14px; cursor: pointer; }
+.dashboard-cancel-btn { background: transparent; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); font-size: 12px; padding: 5px 14px; cursor: pointer; }
+.dashboard-body h1 { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.dashboard-body h2 { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-top: 22px; margin-bottom: 8px; }
+.dashboard-body h3 { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-top: 16px; margin-bottom: 6px; }
+.dashboard-body p { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 10px; }
+.dashboard-body ul, .dashboard-body ol { padding-left: 1.4em; margin-bottom: 10px; }
+.dashboard-body li { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 3px; }
+.dashboard-body a { color: var(--accent); text-decoration: none; }
+.dashboard-body a:hover { color: var(--accent-hover); text-decoration: underline; }
+.dashboard-body code { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-size: 12px; font-family: monospace; }
+.dashboard-body pre { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 5px; padding: 12px; margin: 10px 0; overflow-x: auto; }
+.dashboard-body pre code { background: none; border: none; padding: 0; }
+.dashboard-body blockquote { border-left: 3px solid var(--border); padding: 6px 12px; margin: 10px 0; color: var(--text-muted); background: var(--bg-secondary); border-radius: 0 4px 4px 0; }
+.dashboard-body hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.dashboard-body strong { color: var(--accent-hover); }
+.dashboard-body input[type="checkbox"] { margin-right: 6px; }
+
+/* 定期タスク設定パネル（Phase10）*/
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.modal-box { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; width: 320px; max-width: 90vw; display: flex; flex-direction: column; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.modal-close-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 14px; cursor: pointer; padding: 2px 6px; }
+.modal-close-btn:hover { color: var(--text-primary); }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.recurring-row { display: flex; align-items: center; gap: 10px; }
+.recurring-row label { font-size: 12px; color: var(--text-secondary); width: 44px; flex-shrink: 0; }
+.recurring-row select, .recurring-row input[type="time"], .recurring-row input[type="number"] { flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 4px 8px; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.btn-primary { background: var(--accent); border: none; border-radius: 5px; color: #0d1117; font-size: 12px; font-weight: 600; padding: 5px 14px; cursor: pointer; }
+.btn-secondary { background: transparent; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); font-size: 12px; padding: 5px 14px; cursor: pointer; }

@@ -17,6 +17,17 @@ class TaskMeta(BaseModel):
     approved_at: Optional[str] = None
     sessions: list[str] = []
     talk_session_id: Optional[str] = None
+    # 定期タスクフィールド
+    reset_interval: Optional[str] = None  # every_check / hourly / daily / weekly / monthly
+    repeat_enabled: Optional[bool] = None  # None = デフォルト True として扱う
+    reset_time: Optional[str] = None      # "HH:MM" or ":MM"（hourly）
+    reset_weekday: Optional[str] = None   # weekly のみ（monday〜sunday）
+    reset_monthday: Optional[int] = None  # monthly のみ（1〜31）
+    last_reset_at: Optional[str] = None   # 最終リセット日時（ISO8601）
+
+    @property
+    def is_recurring(self) -> bool:
+        return self.reset_interval is not None
 
 
 class Task(BaseModel):
@@ -31,6 +42,14 @@ class Task(BaseModel):
     sessions: list[str] = []
     talk_session_id: Optional[str] = None
     body: str = ""
+    # 定期タスクフィールド（メタから展開）
+    is_recurring: bool = False
+    reset_interval: Optional[str] = None
+    repeat_enabled: Optional[bool] = None
+    reset_time: Optional[str] = None
+    reset_weekday: Optional[str] = None
+    reset_monthday: Optional[int] = None
+    last_reset_at: Optional[str] = None
 
 
 def _infer_phase(body: str, sessions: list[str], forced_phase: str | None) -> str:
@@ -144,6 +163,13 @@ class TaskManager:
             sessions=meta.sessions,
             talk_session_id=meta.talk_session_id,
             body=body,
+            is_recurring=meta.is_recurring,
+            reset_interval=meta.reset_interval,
+            repeat_enabled=meta.repeat_enabled,
+            reset_time=meta.reset_time,
+            reset_weekday=meta.reset_weekday,
+            reset_monthday=meta.reset_monthday,
+            last_reset_at=meta.last_reset_at,
         )
 
     def _update_phase_in_md(self, task_id: str, phase: str) -> None:
@@ -235,6 +261,50 @@ class TaskManager:
         meta.talk_session_id = session_id
         self._write_meta(meta)
         return self.get_task(task_id)
+
+    def set_recurring(
+        self,
+        task_id: str,
+        reset_interval: str,
+        reset_time: Optional[str] = None,
+        reset_weekday: Optional[str] = None,
+        reset_monthday: Optional[int] = None,
+        repeat_enabled: Optional[bool] = None,
+    ) -> Task:
+        self.get_task(task_id)  # 存在チェック
+        meta = self._read_meta(task_id)
+        meta.reset_interval = reset_interval
+        meta.reset_time = reset_time
+        meta.reset_weekday = reset_weekday
+        meta.reset_monthday = reset_monthday
+        meta.repeat_enabled = repeat_enabled
+        self._write_meta(meta)
+        return self.get_task(task_id)
+
+    def clear_recurring(self, task_id: str) -> Task:
+        self.get_task(task_id)  # 存在チェック
+        meta = self._read_meta(task_id)
+        meta.reset_interval = None
+        meta.reset_time = None
+        meta.reset_weekday = None
+        meta.reset_monthday = None
+        meta.repeat_enabled = None
+        meta.last_reset_at = None
+        self._write_meta(meta)
+        return self.get_task(task_id)
+
+    def get_recurring(self, task_id: str) -> dict:
+        self.get_task(task_id)  # 存在チェック
+        meta = self._read_meta(task_id)
+        return {
+            "is_recurring": meta.is_recurring,
+            "reset_interval": meta.reset_interval,
+            "repeat_enabled": meta.repeat_enabled,
+            "reset_time": meta.reset_time,
+            "reset_weekday": meta.reset_weekday,
+            "reset_monthday": meta.reset_monthday,
+            "last_reset_at": meta.last_reset_at,
+        }
 
     def update_body(self, task_id: str, body: str) -> Task:
         md_file = self._tasks_dir / f"{task_id}.md"

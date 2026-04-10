@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kobito_agents Phase 9 - ダッシュボード モックアップ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-hover: #1f2937;
+    --bg-active: #1f3a5f;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #58a6ff;
+    --accent-hover: #79b8ff;
+    --success: #3fb950;
+    --warning: #d29922;
+    --danger: #f85149;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #090d12;
+    color: var(--text-primary);
+    padding: 40px 20px 80px;
+  }
+
+  .page-title {
+    text-align: center;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    margin-bottom: 60px;
+    text-transform: uppercase;
+  }
+
+  .frame-wrapper {
+    margin: 0 auto 64px;
+    max-width: 1100px;
+  }
+
+  .frame-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    padding-left: 4px;
+  }
+
+  .frame {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  /* ===== 3ペインレイアウト ===== */
+  .three-pane {
+    display: flex;
+    height: 600px;
+  }
+
+  /* サイドバー */
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+
+  .sidebar-section-label {
+    padding: 14px 16px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  .agent-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+  }
+
+  .agent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    margin-bottom: 2px;
+  }
+
+  .agent-item.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+  }
+
+  .agent-item:not(.active):hover {
+    background: var(--bg-hover);
+  }
+
+  .agent-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+    background: #1f6feb44;
+    color: var(--accent);
+  }
+
+  .agent-name {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .agent-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* タブ */
+  .tabs {
+    height: 44px;
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    gap: 0;
+  }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    gap: 5px;
+  }
+
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab:not(.active):hover {
+    color: var(--text-primary);
+  }
+
+  /* ダッシュボードペイン */
+  .dashboard-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .dashboard-header {
+    height: 48px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+  }
+
+  .dashboard-header-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text-secondary);
+  }
+
+  .btn-ghost:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0d1117;
+    border-color: var(--accent);
+  }
+
+  /* マークダウン表示エリア */
+  .dashboard-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px 32px;
+  }
+
+  /* マークダウンレンダリング */
+  .md h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .md h2 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-top: 24px;
+    margin-bottom: 10px;
+  }
+
+  .md h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 18px;
+    margin-bottom: 8px;
+  }
+
+  .md p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 10px;
+  }
+
+  .md ul {
+    list-style: none;
+    padding: 0;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .md li {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .md li::before {
+    content: '·';
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .md a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.1s;
+  }
+
+  .md a:hover {
+    color: var(--accent-hover);
+    border-bottom-color: var(--accent-hover);
+  }
+
+  .md code {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 11px;
+    background: #21262d;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: #e6edf3;
+  }
+
+  .md blockquote {
+    border-left: 3px solid var(--border);
+    padding: 6px 12px;
+    margin: 10px 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    background: var(--bg-secondary);
+    border-radius: 0 4px 4px 0;
+  }
+
+  .md hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 20px 0;
+  }
+
+  /* チェックリスト */
+  .check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 5px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .check-item::before { display: none !important; }
+
+  .check-box {
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    border: 1.5px solid var(--border);
+    flex-shrink: 0;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+  }
+
+  .check-box.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0d1117;
+  }
+
+  .check-box.checked + span {
+    color: var(--text-muted);
+    text-decoration: line-through;
+  }
+
+  /* タグ */
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 10px;
+    border: 1px solid;
+    vertical-align: middle;
+  }
+
+  .tag-blue { color: var(--accent); border-color: #58a6ff44; background: #58a6ff11; }
+  .tag-green { color: var(--success); border-color: #3fb95044; background: #3fb95011; }
+  .tag-yellow { color: var(--warning); border-color: #d2992244; background: #d2992211; }
+
+  /* ===== 編集モード ===== */
+  .editor-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .editor-area {
+    flex: 1;
+    background: var(--bg-primary);
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    padding: 28px 32px;
+    resize: none;
+    width: 100%;
+  }
+
+  .editor-footer {
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .editor-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .btn-save {
+    background: var(--accent);
+    color: #0d1117;
+    border-color: var(--accent);
+  }
+
+  .btn-cancel {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text-secondary);
+  }
+</style>
+</head>
+<body>
+
+<div class="page-title">Phase 9 — ダッシュボード</div>
+
+<!-- ===== Frame 1: 表示モード ===== -->
+<div class="frame-wrapper">
+  <div class="frame-label">Frame 1 — ダッシュボード（表示）</div>
+  <div class="frame">
+    <div class="three-pane">
+
+      <!-- サイドバー -->
+      <div class="sidebar">
+        <div class="sidebar-header">kobito</div>
+        <div class="sidebar-section-label">エージェント</div>
+        <div class="agent-list">
+          <div class="agent-item active">
+            <div class="agent-avatar">C</div>
+            <div>
+              <div class="agent-name">coder</div>
+              <div class="agent-desc">実装担当</div>
+            </div>
+          </div>
+          <div class="agent-item">
+            <div class="agent-avatar">R</div>
+            <div>
+              <div class="agent-name">reviewer</div>
+              <div class="agent-desc">レビュー担当</div>
+            </div>
+          </div>
+          <div class="agent-item">
+            <div class="agent-avatar">D</div>
+            <div>
+              <div class="agent-name">doc-writer</div>
+              <div class="agent-desc">ドキュメント</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- メインコンテンツ -->
+      <div class="dashboard-pane">
+        <!-- タブ -->
+        <div class="tabs">
+          <div class="tab active">📋 ダッシュボード</div>
+          <div class="tab">💬 セッション</div>
+          <div class="tab">✅ タスク</div>
+          <div class="tab">📁 ファイル</div>
+          <div class="tab">⚙ 設定</div>
+        </div>
+
+        <!-- ヘッダー -->
+        <div class="dashboard-header">
+          <div class="dashboard-header-title">coder のダッシュボード</div>
+          <div class="header-actions">
+            <button class="btn btn-ghost">✏ 編集</button>
+          </div>
+        </div>
+
+        <!-- マークダウン表示 -->
+        <div class="dashboard-body">
+          <div class="md">
+            <h1>coder</h1>
+            <p>実装全般を担当。TypeScript / Python が主戦場。</p>
+
+            <h2>🔥 今やっていること</h2>
+            <ul>
+              <li>
+                <a href="#">Phase 9 ダッシュボード実装</a>
+                <span class="tag tag-blue" style="margin-left:6px">進行中</span>
+              </li>
+              <li>フロントエンド: <code>dashboard.js</code> のマークダウンレンダラー</li>
+              <li>バックエンド: <code>GET /api/agents/{id}/dashboard</code> エンドポイント</li>
+            </ul>
+
+            <h2>📌 ピン留め</h2>
+            <ul>
+              <li><a href="#">仕様書 spec_phase9.md</a></li>
+              <li><a href="#">前回セッション（2026-04-08）</a></li>
+              <li><a href="#">タスク task_20260409_xxx.md</a></li>
+            </ul>
+
+            <h2>✅ チェックリスト</h2>
+            <ul>
+              <li class="check-item"><div class="check-box checked">✓</div><span>APIエンドポイント設計</span></li>
+              <li class="check-item"><div class="check-box checked">✓</div><span>dashboard.md の保存・読み込み</span></li>
+              <li class="check-item"><div class="check-box"></div><span>マークダウンレンダリング</span></li>
+              <li class="check-item"><div class="check-box"></div><span>内部リンクのナビゲーション</span></li>
+              <li class="check-item"><div class="check-box"></div><span>編集UIの実装</span></li>
+            </ul>
+
+            <hr>
+
+            <h2>📝 メモ</h2>
+            <blockquote>
+              内部リンクは <code>/agents/{id}/sessions/{session_id}</code> 形式で統一する。<br>
+              クリック時は SPA ルーティングで遷移（ページリロードなし）。
+            </blockquote>
+
+            <h2>🤝 連携</h2>
+            <ul>
+              <li>reviewer に PRレビューを依頼中 → <a href="#">ask_agent 送信済み</a></li>
+              <li>doc-writer とセッション共有: <a href="#">team session #3</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ===== Frame 2: 編集モード ===== -->
+<div class="frame-wrapper">
+  <div class="frame-label">Frame 2 — ダッシュボード（編集）</div>
+  <div class="frame">
+    <div class="three-pane">
+
+      <!-- サイドバー -->
+      <div class="sidebar">
+        <div class="sidebar-header">kobito</div>
+        <div class="sidebar-section-label">エージェント</div>
+        <div class="agent-list">
+          <div class="agent-item active">
+            <div class="agent-avatar">C</div>
+            <div>
+              <div class="agent-name">coder</div>
+              <div class="agent-desc">実装担当</div>
+            </div>
+          </div>
+          <div class="agent-item">
+            <div class="agent-avatar">R</div>
+            <div>
+              <div class="agent-name">reviewer</div>
+              <div class="agent-desc">レビュー担当</div>
+            </div>
+          </div>
+          <div class="agent-item">
+            <div class="agent-avatar">D</div>
+            <div>
+              <div class="agent-name">doc-writer</div>
+              <div class="agent-desc">ドキュメント</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- メインコンテンツ -->
+      <div class="dashboard-pane">
+        <!-- タブ -->
+        <div class="tabs">
+          <div class="tab active">📋 ダッシュボード</div>
+          <div class="tab">💬 セッション</div>
+          <div class="tab">✅ タスク</div>
+          <div class="tab">📁 ファイル</div>
+          <div class="tab">⚙ 設定</div>
+        </div>
+
+        <!-- ヘッダー（編集中） -->
+        <div class="dashboard-header">
+          <div class="dashboard-header-title" style="color: var(--warning);">✏ 編集中</div>
+          <div class="header-actions">
+            <button class="btn btn-cancel">キャンセル</button>
+            <button class="btn btn-save">保存</button>
+          </div>
+        </div>
+
+        <!-- エディタ -->
+        <div class="editor-body">
+          <textarea class="editor-area" readonly># coder
+
+実装全般を担当。TypeScript / Python が主戦場。
+
+## 🔥 今やっていること
+
+- [Phase 9 ダッシュボード実装](/agents/coder/tasks/xxx)
+- フロントエンド: `dashboard.js` のマークダウンレンダラー
+- バックエンド: `GET /api/agents/{id}/dashboard` エンドポイント
+
+## 📌 ピン留め
+
+- [仕様書 spec_phase9.md](/files/docs/spec_phase9.md)
+- [前回セッション（2026-04-08）](/agents/coder/sessions/yyy)
+- [タスク task_20260409_xxx.md](/agents/coder/tasks/xxx)
+
+## ✅ チェックリスト
+
+- [x] APIエンドポイント設計
+- [x] dashboard.md の保存・読み込み
+- [ ] マークダウンレンダリング
+- [ ] 内部リンクのナビゲーション
+- [ ] 編集UIの実装
+
+---
+
+## 📝 メモ
+
+> 内部リンクは `/agents/{id}/sessions/{session_id}` 形式で統一する。
+> クリック時は SPA ルーティングで遷移（ページリロードなし）。
+
+## 🤝 連携
+
+- reviewer に PRレビューを依頼中 → [ask_agent 送信済み](/agents/reviewer/sessions/zzz)
+- doc-writer とセッション共有: [team session #3](/teams/dev-team/sessions/3)
+</textarea>
+          <div class="editor-footer">
+            <span class="editor-hint">Markdown 形式 — 内部リンクは <code>/agents/</code>, <code>/files/</code>, <code>/teams/</code> から始まるパスが使えます</span>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-cancel">キャンセル</button>
+              <button class="btn btn-save">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ===== Frame 3: 別エージェントのダッシュボード ===== -->
+<div class="frame-wrapper">
+  <div class="frame-label">Frame 3 — reviewer のダッシュボード（エージェントが自動更新した例）</div>
+  <div class="frame">
+    <div class="three-pane">
+
+      <!-- サイドバー -->
+      <div class="sidebar">
+        <div class="sidebar-header">kobito</div>
+        <div class="sidebar-section-label">エージェント</div>
+        <div class="agent-list">
+          <div class="agent-item">
+            <div class="agent-avatar">C</div>
+            <div>
+              <div class="agent-name">coder</div>
+              <div class="agent-desc">実装担当</div>
+            </div>
+          </div>
+          <div class="agent-item active">
+            <div class="agent-avatar">R</div>
+            <div>
+              <div class="agent-name">reviewer</div>
+              <div class="agent-desc">レビュー担当</div>
+            </div>
+          </div>
+          <div class="agent-item">
+            <div class="agent-avatar">D</div>
+            <div>
+              <div class="agent-name">doc-writer</div>
+              <div class="agent-desc">ドキュメント</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- メインコンテンツ -->
+      <div class="dashboard-pane">
+        <!-- タブ -->
+        <div class="tabs">
+          <div class="tab active">📋 ダッシュボード</div>
+          <div class="tab">💬 セッション</div>
+          <div class="tab">✅ タスク</div>
+          <div class="tab">📁 ファイル</div>
+          <div class="tab">⚙ 設定</div>
+        </div>
+
+        <!-- ヘッダー -->
+        <div class="dashboard-header">
+          <div class="dashboard-header-title">reviewer のダッシュボード</div>
+          <div class="header-actions">
+            <div style="font-size:11px; color: var(--text-muted);">最終更新: エージェント (2026-04-09 14:32)</div>
+            <button class="btn btn-ghost">✏ 編集</button>
+          </div>
+        </div>
+
+        <!-- マークダウン表示 -->
+        <div class="dashboard-body">
+          <div class="md">
+            <h1>reviewer</h1>
+            <p>コード品質・設計整合性のレビューを担当。</p>
+
+            <h2>📥 レビュー待ち</h2>
+            <ul>
+              <li>
+                <a href="#">[coder] Phase 9 ダッシュボード実装</a>
+                <span class="tag tag-yellow" style="margin-left:6px">依頼あり</span>
+              </li>
+            </ul>
+
+            <h2>✅ 完了したレビュー</h2>
+            <ul>
+              <li><a href="#">Phase 8 ログ整備</a> <span class="tag tag-green" style="margin-left:4px">承認</span></li>
+              <li><a href="#">cli_bridge.py リファクタリング</a> <span class="tag tag-green" style="margin-left:4px">承認</span></li>
+            </ul>
+
+            <h2>📋 レビュー基準メモ</h2>
+            <blockquote>
+              TDD必須。テストなし PR は差し戻し。<br>
+              API変更時は仕様書の更新も確認する。
+            </blockquote>
+
+            <hr>
+
+            <p style="font-size:11px; color: var(--text-muted);">このダッシュボードはエージェントが自動更新しています。</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

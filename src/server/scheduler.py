@@ -20,6 +20,115 @@ logger = logging.getLogger(__name__)
 INTERVAL_SECONDS = 600  # 10分
 MAX_LOG_ENTRIES = 100
 
+_WEEKDAY_MAP = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def should_reset(meta: "TaskMeta", now: datetime) -> bool:  # type: ignore[name-defined]
+    """定期タスクのリセット条件を判定する。
+
+    Returns:
+        True = 今回のチェックでリセットすべき
+    """
+    if not meta.is_recurring:
+        return False
+    if meta.repeat_enabled is False:
+        return False
+
+    interval = meta.reset_interval
+
+    if interval == "every_check":
+        return True
+
+    # last_reset_at をパース
+    last = (
+        datetime.fromisoformat(meta.last_reset_at)
+        if meta.last_reset_at
+        else None
+    )
+
+    if interval == "hourly":
+        # reset_time = ":MM"
+        reset_min = int(meta.reset_time.lstrip(":")) if meta.reset_time else 0
+        if now.minute < reset_min:
+            return False
+        # 今時間すでにリセット済みか
+        if last and last.year == now.year and last.month == now.month \
+                and last.day == now.day and last.hour == now.hour:
+            return False
+        return True
+
+    if interval == "daily":
+        h, m = _parse_hhmm(meta.reset_time)
+        reset_today = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if now < reset_today:
+            return False
+        if last and last.date() >= now.date():
+            return False
+        return True
+
+    if interval == "weekly":
+        target_wd = _WEEKDAY_MAP.get((meta.reset_weekday or "").lower(), -1)
+        if now.weekday() != target_wd:
+            return False
+        h, m = _parse_hhmm(meta.reset_time)
+        reset_today = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if now < reset_today:
+            return False
+        # 今週すでにリセット済みか（ISO週番号で比較）
+        if last and last.isocalendar()[:2] >= now.isocalendar()[:2]:
+            return False
+        return True
+
+    if interval == "monthly":
+        if now.day != (meta.reset_monthday or -1):
+            return False
+        h, m = _parse_hhmm(meta.reset_time)
+        reset_today = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if now < reset_today:
+            return False
+        # 今月すでにリセット済みか
+        if last and (last.year, last.month) >= (now.year, now.month):
+            return False
+        return True
+
+    return False
+
+
+def _parse_hhmm(reset_time: str | None) -> tuple[int, int]:
+    """'HH:MM' を (hour, minute) に変換する"""
+    if not reset_time:
+        return 0, 0
+    parts = reset_time.split(":")
+    return int(parts[0]), int(parts[1])
+
+
+def reset_recurring_task(tm: "TaskManager", task_id: str, now: datetime) -> None:  # type: ignore[name-defined]
+    """定期タスクをリセットする。
+
+    - タスク本文の全チェックボックスを未完了に戻す
+    - MDファイルの phase: done を除去（動的導出に委ねる）
+    - last_reset_at を更新する
+    """
+    task = tm.get_task(task_id)
+
+    # 全チェックボックスを未完了に戻す
+    new_body = re.sub(r"- \[x\]", "- [ ]", task.body, flags=re.IGNORECASE)
+    tm.update_body(task_id, new_body)
+
+    # phase: done をMDから除去（frontmatterから削除して動的導出に委ねる）
+    md_file = tm._tasks_dir / f"{task_id}.md"
+    content = md_file.read_text(encoding="utf-8")
+    content = re.sub(r"^phase:\s*done\s*\n", "", content, flags=re.MULTILINE)
+    md_file.write_text(content, encoding="utf-8")
+
+    # last_reset_at を更新
+    meta = tm._read_meta(task_id)
+    meta.last_reset_at = now.isoformat()
+    tm._write_meta(meta)
+
 
 def _count_checkboxes(body: str) -> tuple[int, int]:
     """(checked, total) を返す"""
@@ -186,6 +295,9 @@ class Scheduler:
         self.last_run = now
         self.next_run = now + timedelta(seconds=self._interval)
 
+        # 定期タスクのリセット判定
+        self._process_recurring_resets(now)
+
         # アイドル状態の各エージェントのタスクを並行起動
         targets = self._select_tasks()
         if not targets:
@@ -196,6 +308,32 @@ class Scheduler:
             logger.info(f"スケジューラー: タスク '{task.task_id}' ({agent.name}) を実行開始")
             self.running.add(agent.id)
             asyncio.create_task(self._run_session(task.task_id, agent_path, agent, now))
+
+    # ----------------------------------------------------------------
+    # 定期リセット処理
+    # ----------------------------------------------------------------
+
+    def _process_recurring_resets(self, now: datetime) -> None:
+        """全エージェントの定期タスクをスキャンし、リセット条件を満たすものをリセットする"""
+        for agent in self._config_manager.list_agents():
+            tm = TaskManager(agent.path)
+            for md_file in sorted(tm._tasks_dir.glob("*.md")):
+                task_id = md_file.stem
+                meta = tm._read_meta(task_id)
+                if not meta.is_recurring:
+                    continue
+                if should_reset(meta, now):
+                    try:
+                        reset_recurring_task(tm, task_id, now)
+                        logger.info(
+                            f"定期リセット: エージェント '{agent.name}' "
+                            f"タスク '{task_id}' をリセットしました"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"定期リセット: タスク '{task_id}' のリセット失敗: {e}",
+                            exc_info=True,
+                        )
 
     # ----------------------------------------------------------------
     # タスク選定
